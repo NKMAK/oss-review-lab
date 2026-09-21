@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   assertPricingForMode,
   computeCost,
+  estimateInputTokens,
   estimateReserve,
   loadPricing,
   parseObservedCost,
@@ -55,7 +56,8 @@ describe("loadPricing", () => {
 });
 
 function pricing2() {
-  return { schemaVersion: 1, inputUsdPerToken: 0.000001, outputUsdPerToken: 0.000001 };
+  // 公式(https://docs.typesafe.ai/models.md): 入力 $0.042/100万トークン、出力は無料
+  return { schemaVersion: 1, inputUsdPerToken: 4.2e-8, outputUsdPerToken: 0 };
 }
 
 describe("assertPricingForMode(単価が未設定のとき)", () => {
@@ -108,16 +110,35 @@ describe("estimateReserve(予約額は、実費の上限でなければならな
   it("初回で、リクエストの大きさから求めた入力費用が --max-cost-per-request を超えるなら、予約できない(上限を保証できない)", () => {
     const b = body(100_000);
     const r = estimateReserve({ requestBody: b, questionCount: 1, history: null, pricing, maxCostPerRequest: 0.05 });
-    expect(bytes(b) * pricing.inputUsdPerToken).toBeGreaterThan(0.05);
+    expect(estimateInputTokens(b, 1) * pricing.inputUsdPerToken).toBeGreaterThan(0.05);
     expect(r.ok).toBe(false);
   });
   it("2回目以降は、入力(リクエストのバイト数を、トークン数の上限とする) + 出力(過去の最大 × 安全率2 × 質問数)で、大きい state ほど大きい予約額", () => {
     const small = estimateReserve({ requestBody: body(100), questionCount: 2, history, pricing });
     const large = estimateReserve({ requestBody: body(10_000), questionCount: 2, history, pricing });
     if (!small.ok || !large.ok) throw new Error("ok expected");
-    expect(small.amount).toBeCloseTo(bytes(body(100)) * 0.000002 + 10 * 2 * 2 * 0.00001, 12);
+    expect(small.amount).toBeCloseTo(estimateInputTokens(body(100), 2) * 0.000002 + 10 * 2 * 2 * 0.00001, 12);
     expect(large.amount).toBeGreaterThan(small.amount);
-    expect(large.amount - small.amount).toBeCloseTo((bytes(body(10_000)) - bytes(body(100))) * 0.000002, 12);
+    expect(large.amount - small.amount).toBeCloseTo((estimateInputTokens(body(10_000), 2) - estimateInputTokens(body(100), 2)) * 0.000002, 12);
+  });
+  it("入力トークン数は、本文のバイト数だけでなく、サーバー側のテンプレート分の固定オーバーヘッドと安全率2を加えた保守的な値", () => {
+    // 公式の例: 本文が短くても(state 約45文字・質問1つ)、input_tokens は 307 だった。バイト数だけでは、下回り得る
+    const b = body(45);
+    expect(estimateInputTokens(b, 1)).toBe((bytes(b) + 1000 + 100) * 2);
+    expect(estimateInputTokens(b, 1)).toBeGreaterThan(307);
+    expect(estimateInputTokens(b, 15)).toBe((bytes(b) + 1000 + 100 * 15) * 2);
+  });
+  it("出力単価が0でも、予約額は入力の費用だけで決まる(出力の項は0)", () => {
+    const free = { schemaVersion: 1 as const, inputUsdPerToken: 4.2e-8, outputUsdPerToken: 0 };
+    const r = estimateReserve({ requestBody: body(45), questionCount: 1, history, pricing: free });
+    expect(r).toEqual({ ok: true, amount: estimateInputTokens(body(45), 1) * 4.2e-8 });
+    const bigOutput = estimateReserve({ requestBody: body(45), questionCount: 1, history: { maxOutputTokensPerQuestion: 100_000 }, pricing: free });
+    expect(bigOutput).toEqual(r);
+  });
+  it("1質問あたりの出力トークン(安全率をかけた値)を、整数に切り上げてから、質問数を掛ける(平均の近似より、多めに見積もる)", () => {
+    // 実績: 15問で出力10トークン → 1問あたり 0.667。× 安全率2 = 1.333 → 2トークンに切り上げ × 15問 = 30(まとめて切り上げると20)
+    const r = estimateReserve({ requestBody: "", questionCount: 15, history: { maxOutputTokensPerQuestion: 10 / 15 }, pricing: { schemaVersion: 1, inputUsdPerToken: 0, outputUsdPerToken: 1 } });
+    expect(r).toEqual({ ok: true, amount: 30 });
   });
   it("質問数が多いほど、出力の上限も大きい", () => {
     const one = estimateReserve({ requestBody: body(10), questionCount: 1, history, pricing });

@@ -22,6 +22,8 @@ const EntrySchema = z.discriminatedUnion("event", [
   }),
   /** 実費が予約額を超えた、という事実の記録(状態は変えない)。settled の直後に書く */
   z.object({ schemaVersion: z.literal(1), at: z.string(), event: z.literal("overrun"), requestId: z.string(), reserved: CostSchema, cost: CostSchema }),
+  /** overrun による停止を、人が明示的に解除した記録。以降の予約は再び可能になる。 */
+  z.object({ schemaVersion: z.literal(1), at: z.string(), event: z.literal("overrun_acknowledged") }),
 ]);
 export type LedgerEntry = z.infer<typeof EntrySchema>;
 
@@ -57,6 +59,7 @@ const EPSILON = 1e-12;
 
 /** 許可された遷移だけを許す。不正なら、理由つきの例外(読み込み時と追記前の両方で使う)。 */
 function nextState(current: RequestState | undefined, entry: LedgerEntry): RequestState {
+  if (entry.event === "overrun_acknowledged") throw new Error("overrun_acknowledged はリクエスト状態を持ちません");
   const name = current?.status ?? "未登録";
   const bad = (): never => {
     throw new Error(`${entry.event}(requestId ${entry.requestId})は、${name} の後には置けません`);
@@ -97,6 +100,7 @@ export class Ledger {
   private readonly states = new Map<string, RequestState>();
   private spent = 0;
   private overrun = false;
+  private overrunRecorded = false;
   private tail: Promise<unknown> = Promise.resolve();
 
   private constructor(
@@ -158,6 +162,15 @@ export class Ledger {
   }
 
   private apply(entry: LedgerEntry): void {
+    if (entry.event === "overrun") {
+      this.overrun = true;
+      this.overrunRecorded = true;
+      return;
+    }
+    if (entry.event === "overrun_acknowledged") {
+      this.overrun = false;
+      return;
+    }
     const next = nextState(this.states.get(entry.requestId), entry);
     if (entry.event === "settled" || entry.event === "failed" || entry.event === "resolved") this.spent += entry.cost;
     this.states.set(entry.requestId, next);
@@ -184,6 +197,11 @@ export class Ledger {
     return this.overrun;
   }
 
+  /** 解除済みを含め、台帳にoverrunの事実が記録されたことがあるか。並列化の判定に使う。 */
+  overrunEverSeen(): boolean {
+    return this.overrunRecorded;
+  }
+
   /** 操作を1つずつ順に実行する(判定と追記の間に、他の予約が割り込まない)。 */
   private serialize<T>(fn: () => Promise<T>): Promise<T> {
     const run = this.tail.then(fn, fn);
@@ -192,7 +210,7 @@ export class Ledger {
   }
 
   private async append(entry: LedgerEntry): Promise<void> {
-    nextState(this.states.get(entry.requestId), entry); // 書く前に、遷移を検証する
+    if (entry.event !== "overrun_acknowledged") nextState(this.states.get(entry.requestId), entry); // 書く前に、遷移を検証する
     await appendFile(this.path, `${JSON.stringify(entry)}\n`);
     this.apply(entry);
   }
@@ -254,9 +272,17 @@ export class Ledger {
       const over = cost > current.amount + EPSILON;
       if (over) {
         await this.append({ schemaVersion: 1, at: this.at(), event: "overrun", requestId, reserved: current.amount, cost });
-        this.overrun = true;
       }
       return { overrun: over };
+    });
+  }
+
+  /** `--acknowledge-overrun`。停止の理由を理解した人だけが、次の送信を開始できるようにする。 */
+  acknowledgeOverrun(): Promise<boolean> {
+    return this.serialize(async () => {
+      if (!this.overrun) return false;
+      await this.append({ schemaVersion: 1, at: this.at(), event: "overrun_acknowledged" });
+      return true;
     });
   }
 

@@ -137,6 +137,34 @@ const SourceEntrySchema = z.object({
 });
 export type IndexSource = z.infer<typeof SourceEntrySchema>;
 
+/** raw と index.json の sources が同じ世代かを検証する。食い違いは import-raw の途中クラッシュの痕跡として止める。 */
+export function verifyRawSources(dataDir: string): void {
+  const index = readIndexFile(dataDir);
+  const parsed = z.array(SourceEntrySchema).safeParse(index?.sources);
+  if (!parsed.success) {
+    throw new RawDataError("index.json の sources を検証できません。もう一度 import-raw を実行してください");
+  }
+  const expected = new Map(parsed.data.map((source) => [source.file, source.sha256]));
+  const rawDir = join(dataDir, "raw");
+  let names: string[];
+  try {
+    names = readdirSync(rawDir).sort();
+  } catch {
+    throw new RawDataError(`${rawDir}: 読めません。もう一度 import-raw を実行してください`);
+  }
+  const actual = new Set(names.map((name) => `raw/${name}`));
+  for (const [file, sha256] of expected) {
+    if (!actual.has(file)) throw new RawDataError(`${file}: index.json の sources にあるファイルがありません。もう一度 import-raw を実行してください`);
+    const actualSha256 = sha256Hex(readFileSync(join(dataDir, file)));
+    if (actualSha256 !== sha256) {
+      throw new RawDataError(`${file}: sha256が index.json の sources と一致しません。もう一度 import-raw を実行してください`);
+    }
+  }
+  for (const file of actual) {
+    if (!expected.has(file)) throw new RawDataError(`${file}: index.json の sources にありません。もう一度 import-raw を実行してください`);
+  }
+}
+
 /** index.json を読む。無ければnull。 */
 export function readIndexFile(dataDir: string): Record<string, unknown> | null {
   const path = join(dataDir, "index.json");

@@ -71,8 +71,19 @@ export const OUTPUT_SAFETY_FACTOR = 2;
 export const NEED_MAX_COST_MESSAGE =
   "使用量が未確認(または単価が未設定)のため、--max-cost-per-request が必須です(最初は --limit 1 --questions is_ack で試してください)";
 
+/** サーバー側が質問をテンプレートに組み込む分(公式の例: 本文が短くても input_tokens は307)。本文のバイト数に、固定で足す。 */
+export const REQUEST_OVERHEAD_TOKENS = 1000;
+export const PER_QUESTION_OVERHEAD_TOKENS = 100;
+/** 入力トークン数の見積もりにかける安全率 */
+export const INPUT_SAFETY_FACTOR = 2;
+
+/** 入力トークン数の見積もり(保守的な上限のつもり。実費を保証しない)。(本文のバイト数 + 固定オーバーヘッド) × 安全率。 */
+export function estimateInputTokens(requestBody: string, questionCount: number): number {
+  return (Buffer.byteLength(requestBody, "utf8") + REQUEST_OVERHEAD_TOKENS + PER_QUESTION_OVERHEAD_TOKENS * questionCount) * INPUT_SAFETY_FACTOR;
+}
+
 export type ReserveInput = {
-  /** 送るリクエスト本文(JSON文字列)。この大きさ(UTF-8のバイト数)を、入力トークン数の上限とする */
+  /** 送るリクエスト本文(JSON文字列)。この大きさ(UTF-8のバイト数)に固定オーバーヘッドと安全率を加えて、入力トークン数を見積もる */
   requestBody: string;
   /** このリクエストに含める質問の数 */
   questionCount: number;
@@ -85,8 +96,8 @@ export type ReserveInput = {
 export type ReserveDecision = { ok: true; amount: number } | { ok: false; reason: string };
 
 /**
- * 1リクエストの予約額(実費の上限でなければならない)。
- * - 入力: リクエスト本文のUTF-8バイト数を、入力トークン数の上限とみなす(1トークンは、少なくとも1バイト)。
+ * 1リクエストの予約額(実費の上限にするつもりの見積もり。保証はしない)。
+ * - 入力: (リクエスト本文のUTF-8バイト数 + 固定オーバーヘッド) × 安全率 を、入力トークン数とみなす(estimateInputTokens)。
  * - 出力: 過去の実績があれば、1質問あたりの最大 × 安全率 × 質問数。無ければ(初回)、`--max-cost-per-request` が必須で、その値を上限とする。
  * - `--max-cost-per-request` があるとき、上限を保証できない(入力費用や見積もりがそれを超える)なら、予約できない(送らない)。
  */
@@ -95,24 +106,21 @@ export function estimateReserve(input: ReserveInput): ReserveDecision {
   if (maxCostPerRequest !== undefined && (!Number.isFinite(maxCostPerRequest) || maxCostPerRequest <= 0)) {
     throw new Error(`--max-cost-per-request は有限で正の数値にしてください: ${String(maxCostPerRequest)}`);
   }
-  const inputCost = pricing === null ? null : Buffer.byteLength(requestBody, "utf8") * pricing.inputUsdPerToken;
+  const inputCost = pricing === null ? null : estimateInputTokens(requestBody, questionCount) * pricing.inputUsdPerToken;
 
   if (history === null || pricing === null) {
     if (maxCostPerRequest === undefined) throw new Error(NEED_MAX_COST_MESSAGE);
     if (inputCost !== null && inputCost > maxCostPerRequest) {
       return {
         ok: false,
-        reason: `リクエストの大きさから求めた入力費用(${inputCost})が --max-cost-per-request(${maxCostPerRequest})を超えるため、上限を保証できず送信しません`,
+        reason: `リクエストの大きさから求めた入力費用(${inputCost})が --max-cost-per-request(${maxCostPerRequest})を超えるため、見積もりの上限を超えて送信しません`,
       };
     }
     return { ok: true, amount: maxCostPerRequest };
   }
 
   // 浮動小数点の誤差(20.000000000000004 など)で、1トークン余計に数えない
-  const outputTokens = Math.max(
-    1,
-    Math.ceil(history.maxOutputTokensPerQuestion * OUTPUT_SAFETY_FACTOR * questionCount - 1e-9),
-  );
+  const outputTokens = Math.max(1, Math.ceil(history.maxOutputTokensPerQuestion * OUTPUT_SAFETY_FACTOR - 1e-9)) * questionCount;
   const amount = (inputCost ?? 0) + outputTokens * pricing.outputUsdPerToken;
   if (maxCostPerRequest !== undefined && amount > maxCostPerRequest) {
     return {
@@ -122,4 +130,3 @@ export function estimateReserve(input: ReserveInput): ReserveDecision {
   }
   return { ok: true, amount };
 }
-

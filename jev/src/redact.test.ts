@@ -26,6 +26,15 @@ describe("redactSecrets(再帰的なマスク)", () => {
     }
   });
 
+  it("同じオブジェクトを複数の場所から参照していても(循環ではない)、そのまま残す。本当の循環だけを止める", () => {
+    const shared = { model: "jev-1.13.0", usage: { input_tokens: 1 } };
+    const out = redactSecrets({ results: [{ raw: shared }, { raw: shared }] }, KEY);
+    expect(out).toEqual({ results: [{ raw: shared }, { raw: shared }] });
+    const loop: Record<string, unknown> = { a: 1 };
+    loop.self = loop;
+    expect(JSON.stringify(redactSecrets(loop, KEY))).toBe('{"a":1,"self":"[REDACTED]"}');
+  });
+
   it("空のキーは何もしない。循環参照でも止まらない", () => {
     expect(redactSecrets({ a: "x" }, "")).toEqual({ a: "x" });
     const c: Record<string, unknown> = { s: KEY };

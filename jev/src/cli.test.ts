@@ -12,6 +12,7 @@ const base = {
   budget: 3.5,
   // 安全側の既定: 並列数1(明示したときだけ増やす)。閾値は既定値を持たない
   concurrency: 1,
+  acknowledgeOverrun: false,
 };
 
 describe("parseCommand", () => {
@@ -46,6 +47,13 @@ describe("parseCommand", () => {
         replyIsAckThreshold: 0.8,
       },
     });
+  });
+
+  it("--acknowledge-overrun は、明示したときだけ true(既定は false)", () => {
+    const on = parseCommand(["run", "--limit", "1", "--questions", "design-api", "--acknowledge-overrun"], env);
+    expect(on.command === "run" && on.options.acknowledgeOverrun).toBe(true);
+    const off = parseCommand(["run", "--limit", "1", "--questions", "design-api"], env);
+    expect(off.command === "run" && off.options.acknowledgeOverrun).toBe(false);
   });
 
   it("--variant with-replies は --reply-is-ack-threshold が必須(既定値を持たない)。--is-ack と parent-only では不要", () => {
@@ -106,6 +114,7 @@ describe("formatDryRun", () => {
         "リクエスト: 3 件(キャッシュ済み 1 件、送信 2 件)",
         "1リクエストあたりの予約額: 0.5 ドル",
         "見積もり費用: 1 ドル",
+        "注記: --max-cost-per-request は見積もりの上限であり、実費を保証しません",
         "注: 見積もりは --max-cost-per-request による上限です",
       ].join("\n"),
     );
@@ -121,6 +130,7 @@ describe("formatDryRun", () => {
         "リクエスト: 1 件(キャッシュ済み 0 件、送信 1 件)",
         "1リクエストあたりの予約額: 不明",
         "見積もり費用: 不明",
+        "注記: --max-cost-per-request は見積もりの上限であり、実費を保証しません",
         "注: n",
       ].join("\n"),
     );

@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,7 +7,7 @@ import type { Thread } from "@oss-review-lab/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildThreads, runBuildThreads } from "./build-threads";
 import type { SourceComment, SourcePr } from "./build-threads";
-import { importRaw } from "./import-raw";
+import { importRaw, sha256Hex } from "./import-raw";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "../test/fixtures/raw");
 
@@ -280,6 +280,7 @@ describe("runBuildThreads: import-raw・run と同じロックで直列化され
       expect(() => runBuildThreads({ dataDir: dir })).toThrow("二重起動は拒否します");
       expect(existsSync(lock)).toBe(true);
       rmSync(lock);
+      importRaw({ from: join(dirname(fileURLToPath(import.meta.url)), "../test/fixtures/raw"), dataDir: dir });
       runBuildThreads({ dataDir: dir });
       expect(existsSync(lock)).toBe(false);
     } finally {
@@ -291,11 +292,25 @@ describe("runBuildThreads: import-raw・run と同じロックで直列化され
 describe("runBuildThreads: ファイル入出力(Integration)", () => {
   let work: string;
   let dataDir: string;
+  let sourcesAtImport: unknown;
+
+  /** rawに置いたファイルを、index.json の sources に登録する(import-raw が済んだ状態を、そのまま作る。整合の検証を通すため) */
+  function registerRaw(): void {
+    const index = JSON.parse(readFileSync(join(dataDir, "index.json"), "utf8"));
+    index.sources = readdirSync(join(dataDir, "raw")).sort().map((name) => ({
+      file: `raw/${name}`,
+      sha256: sha256Hex(readFileSync(join(dataDir, "raw", name))),
+      repo: "example/repo",
+      fetchedAt: "2026-02-03T04:05:06Z",
+    }));
+    writeFileSync(join(dataDir, "index.json"), JSON.stringify(index));
+  }
 
   beforeEach(() => {
     work = mkdtempSync(join(tmpdir(), "build-threads-"));
     dataDir = join(work, "data");
-    cpSync(FIXTURES, join(dataDir, "raw"), { recursive: true });
+    importRaw({ from: FIXTURES, dataDir });
+    sourcesAtImport = JSON.parse(readFileSync(join(dataDir, "index.json"), "utf8")).sources;
   });
 
   afterEach(() => {
@@ -376,7 +391,7 @@ describe("runBuildThreads: ファイル入出力(Integration)", () => {
     const index = JSON.parse(readFileSync(join(dataDir, "index.json"), "utf8"));
     expect(index).toEqual({
       schemaVersion: 1,
-      sources: [],
+      sources: sourcesAtImport,
       threads: { file: "threads/threads.jsonl", sha256: result.sha256, count: 2 },
       runs: [],
     });
@@ -415,13 +430,27 @@ describe("runBuildThreads: ファイル入出力(Integration)", () => {
 
   it("規則に合わないファイルがdata/rawにあれば、ファイル名つきで停止する", () => {
     writeFileSync(join(dataDir, "raw", "memo.txt"), "x");
+    registerRaw();
     expect(errorMessage(() => runBuildThreads({ dataDir }))).toBe(
       "memo.txt: 対応していないファイル名です(rc_<owner>_<repo>.jsonl または prs_<owner>_<repo>.json だけを取り込めます)",
     );
   });
 
+  it("raw が index.json の sources と食い違う(import-raw の途中クラッシュ: rawだけ新しい)と、理由と対処つきで停止し、出力を書かない", () => {
+    // importRaw は「rawをrename → indexを最後にrename」。rawだけが新しい状態を再現する
+    const rc = join(dataDir, "raw", "rc_example_repo.jsonl");
+    writeFileSync(rc, `${readFileSync(rc, "utf8")}\n`);
+    const msg = errorMessage(() => runBuildThreads({ dataDir }));
+    expect(msg).toBe("raw/rc_example_repo.jsonl: sha256が index.json の sources と一致しません。もう一度 import-raw を実行してください");
+    expect(() => readFileSync(join(dataDir, "threads", "threads.jsonl"))).toThrow();
+    // 対処(もう一度 import-raw)で、復旧する
+    importRaw({ from: FIXTURES, dataDir });
+    expect(() => runBuildThreads({ dataDir })).not.toThrow();
+  });
+
   it("重複idはファイルをまたいでも、エラーで停止し、出力を書かない", () => {
     cpSync(join(dataDir, "raw", "rc_example_repo.jsonl"), join(dataDir, "raw", "rc_other_repo.jsonl"));
+    registerRaw();
     expect(errorMessage(() => runBuildThreads({ dataDir }))).toContain("が重複しています");
     expect(() => readFileSync(join(dataDir, "threads", "threads.jsonl"))).toThrow();
   });

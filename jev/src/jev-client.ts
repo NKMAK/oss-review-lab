@@ -121,7 +121,7 @@ async function attemptOnce(
 }
 
 /**
- * 保存してよい応答の許可リスト。`model`・`usage`・`answers`(型・確率・選択肢)だけを残す。
+ * 保存してよい応答の許可リスト。`model`・`usage`・noulの確率だけを残す。
  * 説明文・エコーされたstate・未知のフィールドは落とす(他人のコメント本文を保存物に残さない)。
  * 契約に合わない値は、null(保存しない)。
  */
@@ -135,10 +135,8 @@ export function pickAllowedRaw(json: unknown): unknown {
     answers: Object.fromEntries(
       Object.entries(answers).map(([id, a]) => {
         if (a.type === "noul") return [id, { type: "noul", noul: a.noul }];
-        if (a.type === "choice") {
-          return [id, { type: "choice", choice: a.choice, probabilities: a.probabilities, confidence: a.confidence }];
-        }
-        return [id, { type: "score", score: a.score, probabilities: a.probabilities, confidence: a.confidence }];
+        // choice/score の値・確率のキーは任意文字列なので、コメント本文が混ざり得る。このMVPでは使わない。
+        return [id, { type: a.type }];
       }),
     ),
   };
