@@ -7,7 +7,7 @@ import { atomicWriteFile, atomicWriteJson } from "./atomic-write";
 import { ResultCache, contentHash } from "./cache";
 import { assertPricingForMode, computeCost, estimateReserve, loadPricing, parseObservedCost } from "./cost";
 import type { OutputHistory } from "./cost";
-import { sha256Hex, readIndexFile } from "./import-raw";
+import { sha256Hex, readIndexFile, verifyRawSources } from "./import-raw";
 import { buildRequestBody, callJev } from "./jev-client";
 import type { JevFetch, JevQuestion } from "./jev-client";
 import { Ledger, acquireLock } from "./ledger";
@@ -37,6 +37,8 @@ export type RunJevOptions = {
   questionIds?: string[];
   maxCostPerRequest?: number;
   resolve?: "retry" | "skip";
+  /** overrun による停止を理解した人が、明示的に解除する */
+  acknowledgeOverrun?: boolean;
   observedCost?: number;
   /** with-replies のとき必須(既定値を置かない。目視で決める値) */
   replyIsAckThreshold?: number;
@@ -206,6 +208,7 @@ function validateOptions(o: RunJevOptions): void {
 }
 
 function prepare(o: RunJevOptions): Prepared {
+  verifyRawSources(o.dataDir);
   const manifest = readManifest(o.dataDir);
   const { threads, sha256: threadsSha256 } = readThreads(o.dataDir, manifest);
   const { defs, ackMode } = selectQuestions(o, loadQuestionDefs(o.questionsDir));
@@ -257,6 +260,29 @@ function prepare(o: RunJevOptions): Prepared {
     items,
     stateConfig,
   };
+}
+
+function completedRequestsOf(dataDir: string, p: Prepared): number {
+  let count = 0;
+  for (const entry of p.manifest.runs) {
+    if (!existsSync(join(dataDir, entry.file))) continue;
+    const run = readRunFile(dataDir, entry);
+    if (run.variant !== p.variant || run.questionPlanHash !== p.planHash) continue;
+    count += run.results.filter((result) => result.error === null && result.usage !== null).length;
+  }
+  return count;
+}
+
+/** 出力実績が無い質問計画は、推定予約額を上限と誤認しないよう、試走を1件・1問に絞る。 */
+function assertFirstExecutionGuard(o: RunJevOptions, p: Prepared, completedRequests: number): void {
+  if (completedRequests > 0) return;
+  if (o.mode === "all") throw new Error("出力実績が無い最初の実行では --all は使えません。--limit 1 --questions <id> で試走してください");
+  if (o.mode !== "limit" || o.limit !== 1) {
+    throw new Error("出力実績が無い最初の実行は --limit 1 にしてください(1リクエストだけ送信します)");
+  }
+  if (o.questionIds === undefined || o.questionIds.length !== 1 || p.defs.length !== 1) {
+    throw new Error("出力実績が無い最初の実行は --questions で1つだけ指定してください");
+  }
 }
 
 /**
@@ -402,6 +428,8 @@ export async function runJev(o: RunJevOptions): Promise<RunOutcome> {
   // ログにも、キーを出さない(共通のマスク関数を通す)
   const log = (line: string): void => o.log?.(redactSecrets(line, apiKey));
   const p = prepare(o);
+  const initialCompletedRequests = completedRequestsOf(o.dataDir, p);
+  assertFirstExecutionGuard(o, p, initialCompletedRequests);
   const requestedModel = o.model ?? DEFAULT_MODEL;
 
   const abort = new AbortController();
@@ -432,6 +460,9 @@ export async function runJev(o: RunJevOptions): Promise<RunOutcome> {
     const cache = new ResultCache(join(o.dataDir, "cache"));
 
     // 起動時の回復: 未送信の予約は解放。応答不明(sent)は、--resolve が指定されるまで、新しい送信を始めない。
+    if (o.acknowledgeOverrun === true && (await ledger.acknowledgeOverrun())) {
+      log("overrun の停止を明示的に解除しました。予約額は実費を保証しない見積もりです。並列数は1のままです");
+    }
     const recovered = await ledger.recover();
     let blocked: string | null = null;
     if (o.resolve !== undefined) {
@@ -447,12 +478,16 @@ export async function runJev(o: RunJevOptions): Promise<RunOutcome> {
     }
 
     const history = outputHistoryOf(o.dataDir, p);
+    const completedRequests = initialCompletedRequests;
     // 予約額の見積もりに必要な条件(初回は --max-cost-per-request が必須。不正な値もここで拒否)を、送信の前に確かめる
     estimateReserve({ requestBody: "", questionCount: 1, history, pricing, maxCostPerRequest: o.maxCostPerRequest });
     // 出力トークンの実績が無い最初の試走は、並列数1(予約額が実費の上限になる保証が、最も弱いため)
     let concurrency = o.concurrency;
-    if (history === null && concurrency > 1) {
-      log(`使用量の実績が無い最初の試走なので、並列数を ${concurrency} から 1 にします`);
+    if (concurrency > 1 && (completedRequests < 20 || ledger.overrunEverSeen())) {
+      const reason = ledger.overrunEverSeen()
+        ? "overrun の実績があるため"
+        : `同じ質問計画・variant の完了実績が ${completedRequests} 件で20件未満のため`;
+      log(`${reason}、並列数を ${concurrency} から 1 にします`);
       concurrency = 1;
     }
 

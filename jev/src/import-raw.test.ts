@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { importRaw } from "./import-raw";
+import { importRaw, verifyRawSources } from "./import-raw";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "../test/fixtures/raw");
 const FIXED_MTIME = new Date("2026-02-03T04:05:06Z");
@@ -203,5 +203,43 @@ describe("importRaw: 異常系(いずれも何もコピーせず停止)", () => 
   it("取り込み元が存在しない", () => {
     mkdirSync(dataDir, { recursive: true });
     expect(errorMessage(() => importRaw({ from: join(work, "nothing"), dataDir }))).toContain("取り込み元を読めません");
+  });
+});
+
+describe("verifyRawSources: raw と index.json の sources の整合", () => {
+  beforeEach(() => {
+    importRaw({ from, dataDir });
+  });
+
+  it("import-raw の直後は、通る", () => {
+    expect(() => verifyRawSources(dataDir)).not.toThrow();
+  });
+
+  it("rawのファイルの内容が、index.json の後で変わると(hash不一致)、ファイル名と対処つきで停止する", () => {
+    writeFileSync(join(dataDir, "raw", RC), "{}\n");
+    expect(errorMessage(() => verifyRawSources(dataDir))).toBe(
+      `raw/${RC}: sha256が index.json の sources と一致しません。もう一度 import-raw を実行してください`,
+    );
+  });
+
+  it("index.json に無いファイルがrawにあると(rawだけ新しい)、停止する", () => {
+    writeFileSync(join(dataDir, "raw", "rc_new_repo.jsonl"), "");
+    expect(errorMessage(() => verifyRawSources(dataDir))).toBe(
+      "raw/rc_new_repo.jsonl: index.json の sources にありません。もう一度 import-raw を実行してください",
+    );
+  });
+
+  it("index.json にあるファイルがrawに無いと(indexだけ新しい)、停止する", () => {
+    rmSync(join(dataDir, "raw", PRS));
+    expect(errorMessage(() => verifyRawSources(dataDir))).toBe(
+      `raw/${PRS}: index.json の sources にあるファイルがありません。もう一度 import-raw を実行してください`,
+    );
+  });
+
+  it("index.json が無い、または sources が不正なら、停止する", () => {
+    writeFileSync(join(dataDir, "index.json"), JSON.stringify({ schemaVersion: 1, sources: "x" }));
+    expect(errorMessage(() => verifyRawSources(dataDir))).toContain("もう一度 import-raw を実行してください");
+    rmSync(join(dataDir, "index.json"));
+    expect(errorMessage(() => verifyRawSources(dataDir))).toContain("もう一度 import-raw を実行してください");
   });
 });

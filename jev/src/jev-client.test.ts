@@ -115,6 +115,11 @@ describe("callJev 正常な応答", () => {
     expect(out.results.map((r) => [r.questionType, r.probability, r.confidence, r.error])).toEqual([
       ["choice", null, 0.9, null],
     ]);
+    expect(out.results[0]!.raw).toEqual({
+      model: "jev-1.13.0",
+      usage: { input_tokens: 120, output_tokens: 7 },
+      answers: { c: { type: "choice" } },
+    });
   });
 });
 
@@ -232,7 +237,7 @@ describe("callJev キー保護", () => {
 });
 
 describe("callJev 保存する応答の許可リスト", () => {
-  it("rawには model・usage・answers(型・確率・選択肢)だけを残し、それ以外(エコーされたstateなど)は残さない", async () => {
+  it("rawには model・usage・noulの確率だけを残し、choice/scoreの任意文字列の値・キーを残さない", async () => {
     const body = {
       ...okBody(
         {
@@ -251,10 +256,35 @@ describe("callJev 保存する応答の許可リスト", () => {
       usage: { input_tokens: 5, output_tokens: 2 },
       answers: {
         is_ack: { type: "noul", noul: 0.4 },
-        c: { type: "score", score: "high", probabilities: { high: 0.7 }, confidence: 0.6 },
+        c: { type: "score" },
       },
     });
     expect(JSON.stringify(out).includes("dummy comment body")).toBe(false);
+  });
+});
+
+describe("callJev choice/score の任意文字列は、保存しない", () => {
+  it("選択肢名・確率のキー・scoreの値にコメント本文(ダミー)が入っていても、Result(run・キャッシュに保存されるもの)のどこにも残らない", async () => {
+    const leak = "dummy comment body";
+    const choiceQ: JevQuestion = { id: "c1", type: "choice", instructions: "pick", criteria: { [leak]: "x", other: "y" } };
+    const scoreQ: JevQuestion = { id: "c2", type: "score", instructions: "s", criteria: {} };
+    const { fetch } = makeFetch([
+      jsonResponse(
+        200,
+        okBody({
+          c1: { type: "choice", choice: leak, probabilities: { [leak]: 0.7, other: 0.3 }, confidence: 0.9 },
+          c2: { type: "score", score: leak, legend: { [leak]: leak }, probabilities: { [leak]: 1 }, confidence: 0.8 },
+        }),
+      ),
+    ]);
+    const out = await callJev(input(fetch, [choiceQ, scoreQ]));
+    expect(out.results.map((r) => [r.questionId, r.probability, r.error])).toEqual([["c1", null, null], ["c2", null, null]]);
+    expect(JSON.stringify(out.results).includes(leak)).toBe(false);
+    expect(out.results[0]!.raw).toEqual({
+      model: "jev-1.13.0",
+      usage: { input_tokens: 120, output_tokens: 7 },
+      answers: { c1: { type: "choice" }, c2: { type: "score" } },
+    });
   });
 });
 

@@ -11,7 +11,7 @@ const USAGE = [
   "使い方:",
   "  run --dry-run | --limit N | --all  [--variant parent-only|with-replies] [--is-ack] [--split]",
   "      [--budget 3.5] [--concurrency 1] [--questions id,id] [--max-cost-per-request 0.5]",
-  "      [--resolve retry|skip] [--observed-cost 0.02] [--reply-is-ack-threshold <0-1>(with-replies では必須)]",
+  "      [--resolve retry|skip] [--acknowledge-overrun] [--observed-cost 0.02] [--reply-is-ack-threshold <0-1>(with-replies では必須)]",
   "  report [--run <runId>] [--observed-cost <額>]",
 ].join("\n");
 
@@ -62,6 +62,7 @@ export function parseCommand(argv: string[], env: CliEnv): ParsedCommand {
       questions: { type: "string" },
       "max-cost-per-request": { type: "string" },
       resolve: { type: "string" },
+      "acknowledge-overrun": { type: "boolean" },
       "observed-cost": { type: "string" },
       "reply-is-ack-threshold": { type: "string" },
     },
@@ -105,6 +106,7 @@ export function parseCommand(argv: string[], env: CliEnv): ParsedCommand {
       maxCostPerRequest:
         values["max-cost-per-request"] === undefined ? undefined : num("--max-cost-per-request", values["max-cost-per-request"], "positive"),
       resolve: values.resolve,
+      acknowledgeOverrun: values["acknowledge-overrun"] === true,
       observedCost: values["observed-cost"] === undefined ? undefined : parseObservedCost(values["observed-cost"]),
       replyIsAckThreshold: threshold === undefined ? undefined : num("--reply-is-ack-threshold", threshold, "non-negative"),
     },
@@ -119,6 +121,7 @@ export function formatDryRun(plan: DryRunPlan): string {
     `リクエスト: ${plan.requests} 件(キャッシュ済み ${plan.cachedRequests} 件、送信 ${plan.requestsToSend} 件)`,
     `1リクエストあたりの予約額: ${usd(plan.reservePerRequest)}`,
     `見積もり費用: ${usd(plan.estimatedCost)}`,
+    "注記: --max-cost-per-request は見積もりの上限であり、実費を保証しません",
     `注: ${plan.note}`,
   ].join("\n");
 }
@@ -152,6 +155,9 @@ async function main(argv: string[]): Promise<void> {
   const apiKey = loadApiKey(resolve(JEV_DIR, ".."));
   const outcome = await runJev({ ...options, apiKey, log: (line) => console.log(line) });
   if (outcome.halted !== null) console.log(`停止しました: ${outcome.halted}`);
+  if (outcome.halted?.includes("overrun") === true) {
+    console.log("overrun(実費が予約額を超えた)の原因を確認してから、再開するときだけ --acknowledge-overrun を付けて実行してください(並列数は1のままです)");
+  }
   if (outcome.unresolved.length > 0) {
     console.log(`応答不明(sent のまま)のリクエスト: ${outcome.unresolved.length} 件。--resolve retry|skip で処理してください`);
     for (const u of outcome.unresolved) console.log(`  ${u.requestId}(run ${u.runId}、予約額 ${u.amount} ドル)`);

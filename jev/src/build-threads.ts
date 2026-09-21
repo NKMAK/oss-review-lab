@@ -11,6 +11,7 @@ import {
   readIndexFile,
   resolveDataDir,
   sha256Hex,
+  verifyRawSources,
   writeFileAtomic,
 } from "./import-raw";
 import type { RawComment, RawPr } from "./import-raw";
@@ -195,6 +196,7 @@ export function runBuildThreads({ dataDir }: { dataDir: string }): { count: numb
 }
 
 function runBuildThreadsLocked({ dataDir }: { dataDir: string }): { count: number; sha256: string } {
+  verifyRawSources(dataDir);
   const threads = buildThreads(readRawDir(dataDir));
   const text = threads.map((t) => `${JSON.stringify(t)}\n`).join("");
   const sha256 = sha256Hex(text);

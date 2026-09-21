@@ -163,6 +163,23 @@ describe("overrun(実費が予約額を超えた)", () => {
     expect(await ledger.settle("r1", 0.1 + 0.2)).toEqual({ overrun: false });
     expect(ledger.overrunSeen()).toBe(false);
   });
+
+  it("overrun を記録した台帳を開き直しても予約を拒否し、明示的な解除を記録した後だけ予約できる", async () => {
+    const first = await open(2);
+    await first.reserve("r1", 0.1, "run1");
+    await first.markSent("r1");
+    await first.settle("r1", 0.2);
+    const second = await open(2);
+    expect(second.overrunSeen()).toBe(true);
+    await expect(second.reserve("r2", 0.1, "run2")).resolves.toEqual({
+      ok: false,
+      reason: "実費が予約額を超えた(overrun)ため、新しい送信を止めています",
+    });
+    await second.acknowledgeOverrun();
+    expect(second.overrunSeen()).toBe(false);
+    await expect(second.reserve("r2", 0.1, "run2")).resolves.toEqual({ ok: true });
+    expect((await lines()).map((entry) => (entry as { event: string }).event)).toContain("overrun_acknowledged");
+  });
 });
 
 describe("台帳の最終行の回復", () => {
