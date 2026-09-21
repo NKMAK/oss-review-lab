@@ -107,6 +107,53 @@ describe("importRaw: 正常系", () => {
   });
 });
 
+describe("importRaw: 既存の index.json の検証と、更新の順序", () => {
+  it("既存の index.json の sources が配列でなければ停止し、raw を更新しない(黙って空にしない)", () => {
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(join(dataDir, "index.json"), JSON.stringify({ schemaVersion: 1, sources: "broken", runs: [] }));
+    const msg = errorMessage(() => importRaw({ from, dataDir }));
+    expect(msg).toContain("index.json");
+    expect(msg).toContain("sources");
+    expect(existsSync(join(dataDir, "raw"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(dataDir, "index.json"), "utf8")).sources).toBe("broken");
+  });
+
+  it("sources が無い(オブジェクトだが sources キー無し)既存の index.json も停止する", () => {
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(join(dataDir, "index.json"), JSON.stringify({ schemaVersion: 1, runs: [] }));
+    expect(() => importRaw({ from, dataDir })).toThrow("sources");
+    expect(existsSync(join(dataDir, "raw"))).toBe(false);
+  });
+
+  it("index.json の書き込み準備に失敗しても、raw は古い状態のまま残る", () => {
+    importRaw({ from, dataDir }); // 最初の世代
+    const before = readFileSync(join(dataDir, "raw", RC), "utf8");
+    const indexBefore = readFileSync(join(dataDir, "index.json"), "utf8");
+    writeFileSync(join(from, RC), `${goodComment(99)}\n`); // 新しい世代の内容
+    // index.json の一時ファイルの場所を、ディレクトリで塞いで、準備に失敗させる
+    mkdirSync(join(dataDir, `index.json.tmp-${process.pid}`));
+    expect(() => importRaw({ from, dataDir })).toThrow();
+    expect(readFileSync(join(dataDir, "raw", RC), "utf8")).toBe(before);
+    expect(readFileSync(join(dataDir, "index.json"), "utf8")).toBe(indexBefore);
+  });
+
+  it("run が(ロックを持って)実行中なら、import-raw は拒否される。ロックは、終了時に解放される", () => {
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(join(dataDir, ".lock"), JSON.stringify({ pid: process.pid, createdAt: "2026-09-22T00:00:00.000Z" }));
+    expect(() => importRaw({ from, dataDir })).toThrow("二重起動は拒否します");
+    expect(existsSync(join(dataDir, "raw"))).toBe(false);
+    rmSync(join(dataDir, ".lock"));
+    importRaw({ from, dataDir });
+    expect(existsSync(join(dataDir, ".lock"))).toBe(false);
+  });
+
+  it("検証で失敗しても、ロックは解放される", () => {
+    writeFileSync(join(from, RC), "{oops\n");
+    expect(() => importRaw({ from, dataDir })).toThrow();
+    expect(existsSync(join(dataDir, ".lock"))).toBe(false);
+  });
+});
+
 describe("importRaw: 異常系(いずれも何もコピーせず停止)", () => {
   function expectNothingWritten(): void {
     expect(existsSync(join(dataDir, "raw"))).toBe(false);

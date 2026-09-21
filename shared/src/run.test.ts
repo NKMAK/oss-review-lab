@@ -62,6 +62,11 @@ describe("ResultSchema", () => {
     };
     expect(ResultSchema.parse(r)).toEqual(r);
   });
+  it("error.kind に unknown(応答不明)を受理し、未知の kind は拒否する", () => {
+    const r = { ...validResult, probability: null, usage: null, cost: null, error: { kind: "unknown", message: "timeout", attempts: 1 } };
+    expect(ResultSchema.parse(r)).toEqual(r);
+    expect(ResultSchema.safeParse({ ...r, error: { kind: "other", message: "x", attempts: 1 } }).success).toBe(false);
+  });
   it("確率が範囲外なら拒否する", () => {
     expect(ResultSchema.safeParse({ ...validResult, probability: 1.1 }).success).toBe(false);
     expect(ResultSchema.safeParse({ ...validResult, probability: -0.1 }).success).toBe(false);

@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -15,7 +15,7 @@ const result: Result = {
   questionDefHash: H1,
   stateHash: H2,
   variant: "reply",
-  raw: { type: "noul", noul: 0.9 },
+  raw: { model: "jev-1.13.0", usage: { input_tokens: 100, output_tokens: 10 }, answers: { is_ack: { type: "noul", noul: 0.9 } } },
   probability: 0.9,
   confidence: null,
   latencyMs: 120,
@@ -32,6 +32,31 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
+});
+
+describe("キャッシュへの書き込みは、許可リストを通す", () => {
+  it("許可リスト外のフィールド(エコーされたコメント本文など)は、キャッシュのファイルに残らない", async () => {
+    const dirty: Result = {
+      ...result,
+      raw: {
+        model: "jev-1.13.0",
+        usage: { input_tokens: 1, output_tokens: 1, note: "dummy comment body" },
+        answers: { is_ack: { type: "noul", noul: 0.9, explanation: "dummy comment body" } },
+        echoed: "dummy comment body",
+      },
+    };
+    await cache.put("jev-1.13.0", dirty);
+    const text = await readFile(join(dir, "cache", (await readdir(join(dir, "cache")))[0]!), "utf8");
+    expect(text.includes("dummy comment body")).toBe(false);
+    const hit = await cache.get({ stateHash: H2, questionDefHash: H1, model: "jev-1.13.0" });
+    expect(hit!.raw).toEqual({ model: "jev-1.13.0", usage: { input_tokens: 1, output_tokens: 1 }, answers: { is_ack: { type: "noul", noul: 0.9 } } });
+  });
+
+  it("契約に合わない raw は、保存しない(null)", async () => {
+    await cache.put("jev-1.13.0", { ...result, raw: { echoed: "dummy comment body" } });
+    const hit = await cache.get({ stateHash: H2, questionDefHash: H1, model: "jev-1.13.0" });
+    expect(hit!.raw).toBe(null);
+  });
 });
 
 describe("contentHash", () => {

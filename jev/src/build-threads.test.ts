@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -267,6 +267,24 @@ describe("除外の判定(REQ-002)", () => {
       prs: PRS,
     });
     expect(t?.comments.map((x) => x.isPrAuthor)).toEqual([true, false]);
+  });
+});
+
+describe("runBuildThreads: import-raw・run と同じロックで直列化される", () => {
+  it("ロックが取られている(生きているpid)と拒否し、他人のロックは消さない。終了時にロックは解放される", () => {
+    const dir = mkdtempSync(join(tmpdir(), "bt-lock-"));
+    try {
+      cpSync(join(dirname(fileURLToPath(import.meta.url)), "../test/fixtures/raw"), join(dir, "raw"), { recursive: true });
+      const lock = join(dir, ".lock");
+      writeFileSync(lock, JSON.stringify({ pid: process.pid, createdAt: "2026-09-22T00:00:00.000Z" }));
+      expect(() => runBuildThreads({ dataDir: dir })).toThrow("二重起動は拒否します");
+      expect(existsSync(lock)).toBe(true);
+      rmSync(lock);
+      runBuildThreads({ dataDir: dir });
+      expect(existsSync(lock)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

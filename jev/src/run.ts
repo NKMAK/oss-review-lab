@@ -5,13 +5,14 @@ import { ManifestSchema, RunSchema, ThreadSchema } from "@oss-review-lab/shared"
 import type { Manifest, Result, Run, Thread } from "@oss-review-lab/shared";
 import { atomicWriteFile, atomicWriteJson } from "./atomic-write";
 import { ResultCache, contentHash } from "./cache";
-import { assertPricingForMode, computeCost, decideReserveAmount, loadPricing, parseObservedCost } from "./cost";
-import type { Pricing, Usage } from "./cost";
+import { assertPricingForMode, computeCost, estimateReserve, loadPricing, parseObservedCost } from "./cost";
+import type { OutputHistory } from "./cost";
 import { sha256Hex, readIndexFile } from "./import-raw";
-import { callJev } from "./jev-client";
+import { buildRequestBody, callJev } from "./jev-client";
 import type { JevFetch, JevQuestion } from "./jev-client";
 import { Ledger, acquireLock } from "./ledger";
 import type { LedgerTotals, UnknownRequest } from "./ledger";
+import { redactSecrets } from "./redact";
 import { loadQuestionDefs, buildRequests, questionDefHash, questionPlanHash } from "./questions";
 import type { QuestionDef } from "./questions";
 import { recordObservedCost, countRequests } from "./report";
@@ -37,7 +38,8 @@ export type RunJevOptions = {
   maxCostPerRequest?: number;
   resolve?: "retry" | "skip";
   observedCost?: number;
-  replyIsAckThreshold: number;
+  /** with-replies のとき必須(既定値を置かない。目視で決める値) */
+  replyIsAckThreshold?: number;
   /** 読み込みは loadApiKey。ログ・保存物には出さない */
   apiKey: string | null;
   /** 送るモデル指定(既定 jev-latest) */
@@ -196,6 +198,11 @@ function validateOptions(o: RunJevOptions): void {
     throw new Error(`--limit は1以上の整数にしてください: ${String(o.limit)}`);
   }
   if (o.observedCost !== undefined) parseObservedCost(o.observedCost);
+  if (o.variant === "with-replies" && !o.isAck && o.replyIsAckThreshold === undefined) {
+    throw new Error(
+      "with-replies では --reply-is-ack-threshold が必須です(既定値はありません。除外確認画面で、目視で決めた値を指定してください)",
+    );
+  }
 }
 
 function prepare(o: RunJevOptions): Prepared {
@@ -215,7 +222,8 @@ function prepare(o: RunJevOptions): Prepared {
       }),
     );
   } else if (variant === "with-replies") {
-    stateConfig = { replyIsAckThreshold: o.replyIsAckThreshold };
+    const threshold = o.replyIsAckThreshold!; // validateOptions で必須にしている
+    stateConfig = { replyIsAckThreshold: threshold };
     const ack: Record<string, number> = {};
     for (const entry of manifest.runs) {
       if (entry.variant !== "reply" || !existsSync(join(o.dataDir, entry.file))) continue;
@@ -224,7 +232,7 @@ function prepare(o: RunJevOptions): Prepared {
       }
     }
     units = targets.map((t) => {
-      const b = buildWithRepliesState(t, ack, o.replyIsAckThreshold);
+      const b = buildWithRepliesState(t, ack, threshold);
       return { targetId: t.threadId, state: b.state, stateHash: b.stateHash };
     });
   } else {
@@ -251,19 +259,32 @@ function prepare(o: RunJevOptions): Prepared {
   };
 }
 
-/** 直近の、同じ形(variant・質問計画)のrunの、1リクエストあたりの平均使用量。無ければ null。 */
-function averageUsageOf(dataDir: string, p: Prepared): Usage | null {
-  const run = findRecentRun(
-    dataDir,
-    p.manifest,
-    (r) => r.variant === p.variant && r.questionPlanHash === p.planHash && r.results.some((x) => x.usage !== null),
-  );
-  if (run === null) return null;
-  const usages = run.results.flatMap((r) => (r.usage === null ? [] : [r.usage]));
-  return {
-    inputTokens: usages.reduce((s, u) => s + u.inputTokens, 0) / usages.length,
-    outputTokens: usages.reduce((s, u) => s + u.outputTokens, 0) / usages.length,
-  };
+/**
+ * 同じ形(variant・質問計画)のrunの実績から、1質問あたりの出力トークンの最大を求める。無ければ null(初回)。
+ * 1リクエストに含まれる質問の数は、(同じ targetId の Result の数) / (そのうち usage を持つ Result の数) で近似する
+ * (通常のrunは質問数、--split は 1)。
+ */
+function outputHistoryOf(dataDir: string, p: Prepared): OutputHistory | null {
+  let max: number | null = null;
+  for (const entry of p.manifest.runs) {
+    if (!existsSync(join(dataDir, entry.file))) continue;
+    const run = readRunFile(dataDir, entry);
+    if (run.variant !== p.variant || run.questionPlanHash !== p.planHash) continue;
+    const perTarget = new Map<string, { results: number; requests: number }>();
+    for (const r of run.results) {
+      const c = perTarget.get(r.targetId) ?? { results: 0, requests: 0 };
+      c.results++;
+      if (r.usage !== null) c.requests++;
+      perTarget.set(r.targetId, c);
+    }
+    for (const r of run.results) {
+      if (r.usage === null) continue;
+      const c = perTarget.get(r.targetId)!;
+      const perQuestion = r.usage.outputTokens / (c.results / c.requests);
+      max = max === null ? perQuestion : Math.max(max, perQuestion);
+    }
+  }
+  return max === null ? null : { maxOutputTokensPerQuestion: max };
 }
 
 /** キャッシュ検索に使うモデル識別子(直近の成功したrunのもの)。未知なら null(ミス扱い)。 */
@@ -271,8 +292,19 @@ function knownModelOf(dataDir: string, p: Prepared): string | null {
   return findRecentRun(dataDir, p.manifest, (r) => r.results.some((x) => x.error === null))?.model ?? null;
 }
 
-function requestContentKey(p: Prepared, item: Item, questionIds: string[]): string {
-  return contentHash([p.variant, item.unit.stateHash, questionIds.map((id) => [id, p.defHash.get(id)])]).slice(0, 16);
+/**
+ * リクエストの同一性 = 内容(正規化済みstateのhash + 質問定義のhash + モデル)。台帳のリクエストIDに使う。
+ * runId を含めないので、別のrunでも同じリクエストとして扱える(skip・確定済みを引き継ぐ)。
+ */
+function requestContentKey(p: Prepared, item: Item, questionIds: string[], model: string): string {
+  return contentHash([p.variant, item.unit.stateHash, questionIds.map((id) => [id, p.defHash.get(id)]), model]).slice(0, 32);
+}
+
+function questionsOf(p: Prepared, ids: string[]): JevQuestion[] {
+  return ids.map((id) => {
+    const d = p.defs.find((x) => x.id === id)!;
+    return { id, type: d.type, instructions: d.instructions, criteria: d.criteria };
+  });
 }
 
 async function lookup(
@@ -300,19 +332,32 @@ export async function planDryRun(o: RunJevOptions): Promise<DryRunPlan> {
   const p = prepare(o);
   const cache = new ResultCache(join(o.dataDir, "cache"));
   const model = knownModelOf(o.dataDir, p);
-  let cached = 0;
-  for (const item of p.items) {
-    if ((await lookup(cache, p, item, model)).missing.length === 0) cached++;
-  }
-  const requestsToSend = p.items.length - cached;
   const pricing = await loadPricing(o.pricingPath);
-  let reserve: number | null = null;
-  let note = "使用量が未確認のため見積もれません(--max-cost-per-request を指定してください)";
-  try {
-    reserve = decideReserveAmount({ maxCostPerRequest: o.maxCostPerRequest, averageUsage: averageUsageOf(o.dataDir, p), pricing });
-    note = o.maxCostPerRequest !== undefined ? "見積もりは --max-cost-per-request による上限です" : "見積もりは直近のrunの平均使用量による";
-  } catch (e) {
-    if (o.maxCostPerRequest !== undefined) throw e; // 不正な値は、見積もりでも知らせる
+  const history = outputHistoryOf(o.dataDir, p);
+  const requestedModel = o.model ?? DEFAULT_MODEL;
+  let cached = 0;
+  let requestsToSend = 0;
+  let reserveMax: number | null = null;
+  let estimated = 0;
+  let unknown = false;
+  for (const item of p.items) {
+    const { missing } = await lookup(cache, p, item, model);
+    if (missing.length === 0) {
+      cached++;
+      continue;
+    }
+    requestsToSend++;
+    try {
+      const body = buildRequestBody(item.unit.state, requestedModel, questionsOf(p, missing));
+      const d = estimateReserve({ requestBody: body, questionCount: missing.length, history, pricing, maxCostPerRequest: o.maxCostPerRequest });
+      if (d.ok) {
+        reserveMax = Math.max(reserveMax ?? 0, d.amount);
+        estimated += d.amount;
+      }
+    } catch (e) {
+      if (o.maxCostPerRequest !== undefined) throw e; // 不正な値は、見積もりでも知らせる
+      unknown = true;
+    }
   }
   return {
     targets: p.units.length,
@@ -320,25 +365,33 @@ export async function planDryRun(o: RunJevOptions): Promise<DryRunPlan> {
     requests: p.items.length,
     cachedRequests: cached,
     requestsToSend,
-    reservePerRequest: reserve,
-    estimatedCost: reserve === null ? null : reserve * requestsToSend,
-    note,
+    reservePerRequest: unknown ? null : reserveMax,
+    estimatedCost: unknown ? null : estimated,
+    note: unknown
+      ? "使用量が未確認のため見積もれません(--max-cost-per-request を指定してください)"
+      : history === null || pricing === null
+        ? "見積もりは --max-cost-per-request による上限です"
+        : "見積もりは、リクエストの大きさと、直近のrunの出力トークンの実績による上限です",
   };
 }
 
 type Failure = "billed-unknown" | "not-billed" | "uncertain";
 
-/** 失敗したリクエストの、課金の扱い。応答の有無で分ける(応答不明は、台帳に sent のまま残す)。 */
-function classifyFailure(message: string): Failure {
-  if (/^HTTP \d{3}:/.test(message)) return "not-billed";
-  if (/^(timeout after|network error)/.test(message)) return "uncertain";
-  return "billed-unknown"; // 2xxだが契約に合わない応答など: 課金された可能性があり、使用量も不明
+/**
+ * 失敗したリクエストの、課金の扱い。応答の有無で分ける。
+ * - unknown(応答不明): 課金されたかもしれない。台帳に sent のまま残す(自動では再送しない)
+ * - 429・529・4xx(状態コードだけのメッセージ): 処理されていない。課金なし
+ * - それ以外(2xxなのに契約に合わない応答など): 課金された可能性があり、使用量も不明。予約額を確定する
+ */
+function classifyFailure(error: NonNullable<Result["error"]>): Failure {
+  if (error.kind === "unknown") return "uncertain";
+  if (error.kind === "retryable" || /^HTTP \d{3}$/.test(error.message)) return "not-billed";
+  return "billed-unknown";
 }
 
 export async function runJev(o: RunJevOptions): Promise<RunOutcome> {
   if (o.mode === "dry-run") throw new Error("dry-run は planDryRun を使ってください");
   validateOptions(o);
-  const log = o.log ?? (() => {});
   const now = o.now ?? (() => new Date());
   const pricing = await loadPricing(o.pricingPath);
   assertPricingForMode(o.mode, pricing);
@@ -346,6 +399,8 @@ export async function runJev(o: RunJevOptions): Promise<RunOutcome> {
     throw new Error(`${KEY_NAME} が見つかりません(.claude/doc/.env かリポジトリ直下の .env に設定してください)`);
   }
   const apiKey = o.apiKey;
+  // ログにも、キーを出さない(共通のマスク関数を通す)
+  const log = (line: string): void => o.log?.(redactSecrets(line, apiKey));
   const p = prepare(o);
   const requestedModel = o.model ?? DEFAULT_MODEL;
 
@@ -373,32 +428,33 @@ export async function runJev(o: RunJevOptions): Promise<RunOutcome> {
   }
 
   async function execute(): Promise<RunOutcome> {
-    const ledger = await Ledger.open(join(o.dataDir, "ledger.jsonl"), { limit: o.budget, now });
+    const ledger = await Ledger.open(join(o.dataDir, "ledger.jsonl"), { limit: o.budget, now, warn: log });
     const cache = new ResultCache(join(o.dataDir, "cache"));
 
-    // 起動時の回復: 未送信の予約は解放。応答不明(sent)は、--resolve が指定されるまで保留する。
+    // 起動時の回復: 未送信の予約は解放。応答不明(sent)は、--resolve が指定されるまで、新しい送信を始めない。
     const recovered = await ledger.recover();
-    const heldKeys = new Set<string>();
-    const skipKeys = new Set<string>();
-    const contentKeyOf = (requestId: string): string => requestId.split("@")[0]!;
+    let blocked: string | null = null;
     if (o.resolve !== undefined) {
       for (const u of recovered.unresolved) {
         await ledger.resolve(u.requestId, o.resolve);
-        if (o.resolve === "skip") skipKeys.add(contentKeyOf(u.requestId));
         log(`応答不明のリクエスト ${u.requestId} を ${o.resolve} で処理しました(予約額 ${u.amount} を使用済みとして数えます)`);
       }
-    } else {
+    } else if (recovered.unresolved.length > 0) {
       for (const u of recovered.unresolved) {
-        heldKeys.add(contentKeyOf(u.requestId));
-        log(`応答不明のリクエスト ${u.requestId}(予約額 ${u.amount})があります。再送しません。--resolve retry|skip で処理してください`);
+        log(`応答不明のリクエスト ${u.requestId}(run ${u.runId}、予約額 ${u.amount})があります。再送しません`);
       }
+      blocked = `応答不明のリクエストが ${recovered.unresolved.length} 件あります。--resolve retry|skip を指定するまで、新しい送信は始めません: ${recovered.unresolved.map((u) => u.requestId).join(", ")}`;
     }
 
-    let reserveAmount = decideReserveAmount({
-      maxCostPerRequest: o.maxCostPerRequest,
-      averageUsage: averageUsageOf(o.dataDir, p),
-      pricing,
-    });
+    const history = outputHistoryOf(o.dataDir, p);
+    // 予約額の見積もりに必要な条件(初回は --max-cost-per-request が必須。不正な値もここで拒否)を、送信の前に確かめる
+    estimateReserve({ requestBody: "", questionCount: 1, history, pricing, maxCostPerRequest: o.maxCostPerRequest });
+    // 出力トークンの実績が無い最初の試走は、並列数1(予約額が実費の上限になる保証が、最も弱いため)
+    let concurrency = o.concurrency;
+    if (history === null && concurrency > 1) {
+      log(`使用量の実績が無い最初の試走なので、並列数を ${concurrency} から 1 にします`);
+      concurrency = 1;
+    }
 
     // runId(同じ秒でも重ならない)
     const createdAt = iso(now());
@@ -414,6 +470,7 @@ export async function runJev(o: RunJevOptions): Promise<RunOutcome> {
     let halted: string | null = null;
     let sentRequests = 0;
     const withheld: { contentKey: string }[] = [];
+    if (blocked !== null) halted = blocked;
     const slots: Result[][] = p.items.map(() => []);
     let expected = 0;
     for (const item of p.items) expected += item.questionIds.length;
@@ -447,7 +504,8 @@ export async function runJev(o: RunJevOptions): Promise<RunOutcome> {
       try {
         const { hits, missing } = await lookup(cache, p, item, knownModel);
         const fresh = new Map<string, Result>();
-        if (missing.length > 0 && !abort.signal.aborted && halted === null) {
+        // 停止中は送らない。ただし、応答不明で止めているときは、send が保留として数える(一覧を出すため)
+        if (missing.length > 0 && !abort.signal.aborted && (halted === null || blocked !== null)) {
           await send(item, missing, fresh);
         }
         slots[index] = item.questionIds.flatMap((id) => {
@@ -460,28 +518,53 @@ export async function runJev(o: RunJevOptions): Promise<RunOutcome> {
     }
 
     async function send(item: Item, missing: string[], out: Map<string, Result>): Promise<void> {
-      const contentKey = requestContentKey(p, item, missing);
-      if (skipKeys.has(contentKey)) return;
-      if (heldKeys.has(contentKey)) {
-        withheld.push({ contentKey });
+      const requestId = requestContentKey(p, item, missing, requestedModel);
+      const stop = (error: NonNullable<Result["error"]>): void => {
+        for (const id of missing) out.set(id, errorResult(item, id, error));
+      };
+
+      // 台帳の状態で、送ってよいかを決める(リクエストの同一性は内容。別のrunでも引き継ぐ)
+      const status = ledger.statusOf(requestId);
+      if (status === "settled") {
+        // 確定済み(課金済み)なのに、キャッシュに無い。再送すると二重課金になるので、送らない
+        stop({ kind: "fatal", message: "already settled in the ledger but missing from the cache; not re-sent to avoid double billing", attempts: 0, stopReason: "already-billed" });
         return;
       }
-      const requestId = `${contentKey}@${runId}`;
-      const amount = reserveAmount;
+      if (status === "skipped") {
+        if (o.resolve === "retry") await ledger.resolve(requestId, "retry");
+        else {
+          stop({ kind: "fatal", message: "skipped by --resolve skip (use --resolve retry to send it again)", attempts: 0, stopReason: "skipped" });
+          return;
+        }
+      }
+      if (status === "sent" || status === "reserved" || blocked !== null) {
+        withheld.push({ contentKey: requestId });
+        stop({ kind: "retryable", message: "withheld: an earlier request with unknown outcome is unresolved", attempts: 0, stopReason: "unresolved-unknown" });
+        return;
+      }
+
+      const questions = questionsOf(p, missing);
+      const decision = estimateReserve({
+        requestBody: buildRequestBody(item.unit.state, requestedModel, questions),
+        questionCount: missing.length,
+        history,
+        pricing,
+        maxCostPerRequest: o.maxCostPerRequest,
+      });
+      if (!decision.ok) {
+        // 予約額が実費の上限として成り立たない(またはこのリクエストだけ --max-cost-per-request を超える)。送らない
+        stop({ kind: "fatal", message: decision.reason, attempts: 0, stopReason: "reserve-exceeds-cap" });
+        return;
+      }
+      const amount = decision.amount;
       const reserved = await ledger.reserve(requestId, amount, runId);
       if (!reserved.ok) {
         halted ??= reserved.reason;
-        for (const id of missing) {
-          out.set(id, errorResult(item, id, { kind: "retryable", message: reserved.reason, attempts: 0, stopReason: "budget-limit" }));
-        }
+        stop({ kind: "retryable", message: reserved.reason, attempts: 0, stopReason: "budget-limit" });
         return;
       }
       await ledger.markSent(requestId);
       sentRequests++;
-      const questions: JevQuestion[] = missing.map((id) => {
-        const d = p.defs.find((x) => x.id === id)!;
-        return { id, type: d.type, instructions: d.instructions, criteria: d.criteria };
-      });
       const outcome = await callJev({
         state: item.unit.state,
         questions,
@@ -509,17 +592,18 @@ export async function runJev(o: RunJevOptions): Promise<RunOutcome> {
         // 費用は、リクエスト単位で1回だけ数える(全Resultに同じusageが入っているため、合算すると質問数倍になる)
         const results = outcome.results.map((r, i) => ({ ...r, cost: i === 0 ? cost : null, usage: i === 0 ? r.usage : null }));
         for (const r of results) await cache.put(outcome.model!, r);
-        await ledger.settle(requestId, cost ?? amount);
-        reserveAmount = Math.max(reserveAmount, cost ?? amount);
+        const { overrun } = await ledger.settle(requestId, cost ?? amount);
+        if (overrun) {
+          // 実費が予約額を超えた。台帳に記録済み。直ちに新しい送信を止める(実行中の分は、待つ)
+          halted ??= `実費(${cost})が予約額(${amount})を超えました(overrun)。予約額が実費の上限になっていないため、新しい送信を止めます`;
+          log(halted);
+        }
         for (const r of results) out.set(r.questionId, r);
       } else {
         for (const r of outcome.results) out.set(r.questionId, r);
-        const kind = classifyFailure(first.error.message);
+        const kind = classifyFailure(first.error);
         if (kind === "not-billed") await ledger.fail(requestId, first.error.message, 0);
-        else if (kind === "billed-unknown") {
-          await ledger.fail(requestId, first.error.message, amount);
-          reserveAmount = Math.max(reserveAmount, amount);
-        }
+        else if (kind === "billed-unknown") await ledger.fail(requestId, first.error.message, amount);
         // uncertain: 台帳に sent のまま残す(応答不明。自動では再送しない)
       }
     }
@@ -532,7 +616,7 @@ export async function runJev(o: RunJevOptions): Promise<RunOutcome> {
         const results = collect();
         const ok = results.length === expected && results.every((r) => r.error === null);
         const complete = final && !abort.signal.aborted && halted === null && withheld.length === 0 && ok;
-        const run: Run = RunSchema.parse({
+        const run: Run = RunSchema.parse(redactSecrets({
           schemaVersion: 1,
           runId,
           model: actualModel ?? knownModel ?? requestedModel,
@@ -545,7 +629,7 @@ export async function runJev(o: RunJevOptions): Promise<RunOutcome> {
           finishedAt: final ? iso(now()) : null,
           status: complete ? "complete" : "partial",
           results,
-        });
+        }, apiKey));
         const file = `runs/${runId}.json`;
         const text = `${JSON.stringify(run, null, 2)}\n`;
         await atomicWriteFile(join(o.dataDir, file), text);
@@ -572,7 +656,7 @@ export async function runJev(o: RunJevOptions): Promise<RunOutcome> {
       }
     };
     try {
-      await Promise.all(Array.from({ length: Math.min(o.concurrency, Math.max(p.items.length, 1)) }, worker));
+      await Promise.all(Array.from({ length: Math.min(concurrency, Math.max(p.items.length, 1)) }, worker));
     } catch (e) {
       // 予期しない失敗でも、保存済みの結果は残す(台帳は、送信済みなら sent のまま残る)
       await persist(true).catch(() => undefined);

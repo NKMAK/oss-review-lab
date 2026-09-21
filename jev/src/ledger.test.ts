@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -122,7 +122,7 @@ describe("予約", () => {
   });
 
   it("壊れた台帳の行は、行番号つきで止める", async () => {
-    await writeFile(ledgerPath, `${JSON.stringify({ schemaVersion: 1, at, event: "sent", requestId: "x" })}\n{oops\n`);
+    await writeFile(ledgerPath, `${JSON.stringify(reservedLine("x"))}\n{oops\n`);
     await expect(open(1)).rejects.toThrow(`${ledgerPath}:2: 台帳の行がJSONとして読めません`);
     await writeFile(ledgerPath, `{"schemaVersion":1,"event":"unknown"}\n`);
     await expect(open(1)).rejects.toThrow(`${ledgerPath}:1: 台帳の行の形式が不正です`);
@@ -130,6 +130,122 @@ describe("予約", () => {
 
   it("上限が不正なら拒否する", async () => {
     await expect(open(Number.NaN)).rejects.toThrow("上限は有限で非負の数値にしてください: NaN");
+  });
+});
+
+function reservedLine(id: string, amount = 0.1) {
+  return { schemaVersion: 1, at, event: "reserved", requestId: id, runId: "run1", amount };
+}
+const ev = (event: string, id: string, extra: Record<string, unknown> = {}) => ({ schemaVersion: 1, at, event, requestId: id, ...extra });
+const jsonl = (...entries: unknown[]) => entries.map((e) => `${JSON.stringify(e)}\n`).join("");
+
+describe("overrun(実費が予約額を超えた)", () => {
+  it("settle で実費が予約額を超えたら、overrun を台帳に記録し、以降の予約を拒否する", async () => {
+    const ledger = await open(10);
+    await ledger.reserve("r1", 1, "run1");
+    await ledger.reserve("r2", 1, "run1");
+    await ledger.markSent("r1");
+    await ledger.markSent("r2");
+    expect(await ledger.settle("r1", 2)).toEqual({ overrun: true });
+    expect(ledger.overrunSeen()).toBe(true);
+    expect(await lines()).toContainEqual(ev("overrun", "r1", { reserved: 1, cost: 2 }));
+    const r3 = await ledger.reserve("r3", 0.1, "run1");
+    expect(r3.ok).toBe(false);
+    // 実行中の分は、待って確定できる
+    expect(await ledger.settle("r2", 1)).toEqual({ overrun: false });
+    expect(ledger.totals()).toEqual({ limit: 10, spent: 3, held: 0 });
+  });
+
+  it("予約額ちょうどは overrun ではない", async () => {
+    const ledger = await open(10);
+    await ledger.reserve("r1", 0.3, "run1");
+    await ledger.markSent("r1");
+    expect(await ledger.settle("r1", 0.1 + 0.2)).toEqual({ overrun: false });
+    expect(ledger.overrunSeen()).toBe(false);
+  });
+});
+
+describe("台帳の最終行の回復", () => {
+  it("最終行だけが途中で切れている(クラッシュの痕跡)なら、警告を出し、バックアップを取って、切り詰めて回復する", async () => {
+    const good = jsonl(reservedLine("r1"), ev("sent", "r1"));
+    await writeFile(ledgerPath, `${good}{"schemaVersion":1,"at":"2026-09-2`);
+    const warnings: string[] = [];
+    const ledger = await Ledger.open(ledgerPath, { limit: 1, now: () => FIXED, warn: (m) => warnings.push(m) });
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain("最終行");
+    expect(ledger.unresolved().map((u) => u.requestId)).toEqual(["r1"]);
+    expect(await readFile(ledgerPath, "utf8")).toBe(good);
+    const backups = (await readdir(dir)).filter((n) => n.startsWith("ledger.jsonl.bak-"));
+    expect(backups.length).toBe(1);
+    expect(await readFile(join(dir, backups[0]!), "utf8")).toBe(`${good}{"schemaVersion":1,"at":"2026-09-2`);
+    // 回復後の追記が、壊れた行に連結されない
+    await ledger.settle("r1", 0.1);
+    expect((await lines()).length).toBe(3);
+  });
+
+  it("最終行が完全だが改行だけ無いときは、改行を補って続ける(警告・切り詰めなし)", async () => {
+    await writeFile(ledgerPath, `${JSON.stringify(reservedLine("r1"))}`);
+    const ledger = await open(1);
+    await ledger.markSent("r1");
+    expect((await lines()).length).toBe(2);
+  });
+
+  it("途中の行の破損は、これまでどおり停止する(最終行が切れていても、その前の破損を隠さない)", async () => {
+    await writeFile(ledgerPath, `${JSON.stringify(reservedLine("r1"))}\n{oops\n${JSON.stringify(ev("sent", "r1"))}\n{"trunc`);
+    await expect(open(1)).rejects.toThrow(`${ledgerPath}:2: 台帳の行がJSONとして読めません`);
+  });
+
+  it("改行で終わっている壊れた最終行は、クラッシュの痕跡とはみなさず、停止する", async () => {
+    await writeFile(ledgerPath, `${JSON.stringify(reservedLine("r1"))}\n{oops\n`);
+    await expect(open(1)).rejects.toThrow(`${ledgerPath}:2: 台帳の行がJSONとして読めません`);
+  });
+});
+
+describe("台帳の遷移の検証(読み込み時)", () => {
+  const bad: Array<[string, unknown[], number]> = [
+    ["settled の重複", [reservedLine("r1"), ev("sent", "r1"), ev("settled", "r1", { cost: 0.1 }), ev("settled", "r1", { cost: 0.1 })], 4],
+    ["released の後の sent", [reservedLine("r1"), ev("released", "r1", { reason: "x" }), ev("sent", "r1")], 3],
+    ["reserved なしの sent", [ev("sent", "r1")], 1],
+    ["sent なしの settled", [reservedLine("r1"), ev("settled", "r1", { cost: 0.1 })], 2],
+    ["sent の重複", [reservedLine("r1"), ev("sent", "r1"), ev("sent", "r1")], 3],
+    ["settled の後の reserved", [reservedLine("r1"), ev("sent", "r1"), ev("settled", "r1", { cost: 0.1 }), reservedLine("r1")], 4],
+    ["reserved の重複", [reservedLine("r1"), reservedLine("r1")], 2],
+    ["sent でないものの resolved", [reservedLine("r1"), ev("resolved", "r1", { resolution: "retry", cost: 0.1 })], 2],
+    ["skipped の後の sent", [reservedLine("r1"), ev("sent", "r1"), ev("resolved", "r1", { resolution: "skip", cost: 0.1 }), ev("sent", "r1")], 4],
+    ["未登録の settled", [ev("settled", "zz", { cost: 0.1 })], 1],
+  ];
+  it.each(bad)("%s は、行番号つきで停止する", async (_name, entries, line) => {
+    await writeFile(ledgerPath, jsonl(...entries));
+    await expect(open(10)).rejects.toThrow(new RegExp(`${ledgerPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:${line}: 台帳の遷移が不正です`));
+  });
+
+  it("許可された遷移(reserved→sent→settled|failed、reserved→released、sent→resolved、failed/released/retry の後の再予約)は通る", async () => {
+    await writeFile(
+      ledgerPath,
+      jsonl(
+        reservedLine("a"), ev("sent", "a"), ev("settled", "a", { cost: 0.1 }),
+        reservedLine("b"), ev("sent", "b"), ev("failed", "b", { cost: 0, reason: "x" }), reservedLine("b"), ev("released", "b", { reason: "x" }), reservedLine("b"),
+        reservedLine("c"), ev("sent", "c"), ev("resolved", "c", { resolution: "retry", cost: 0.1 }), reservedLine("c"),
+      ),
+    );
+    await expect(open(10)).resolves.toBeDefined();
+  });
+});
+
+describe("skip の永続化", () => {
+  it("skip したリクエストは、別の runId でも再予約できない。retry を明示したときだけ、再予約できる", async () => {
+    const first = await open(10);
+    await first.reserve("k1", 0.4, "run1");
+    await first.markSent("k1");
+    await first.resolve("k1", "skip");
+    const second = await open(10);
+    expect(second.statusOf("k1")).toBe("skipped");
+    await expect(second.reserve("k1", 0.4, "run2")).rejects.toThrow("requestId k1 は既に skipped です");
+    await second.resolve("k1", "retry");
+    expect(second.statusOf("k1")).toBe("idle");
+    expect(await second.reserve("k1", 0.4, "run2")).toEqual({ ok: true });
+    // skip の再 retry は、追加の費用を数えない
+    expect(second.totals()).toEqual({ limit: 10, spent: 0.4, held: 0.4 });
   });
 });
 
@@ -177,7 +293,7 @@ describe("回復", () => {
     const second = await open(1);
     await second.resolve("r1", "skip");
     expect(second.totals()).toEqual({ limit: 1, spent: 0.4, held: 0 });
-    await expect(second.reserve("r1", 0.4, "run2")).rejects.toThrow("requestId r1 は既に done です");
+    await expect(second.reserve("r1", 0.4, "run2")).rejects.toThrow("requestId r1 は既に skipped です");
   });
 
   it("応答不明でないものを resolve すると拒否する", async () => {

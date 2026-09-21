@@ -27,7 +27,8 @@ export const ResultSchema = z.object({
   cost: z.number().min(0).nullable(),
   error: z
     .object({
-      kind: z.enum(["retryable", "fatal"]),
+      /** retryable: 429/529で再試行を尽くした。fatal: 4xxや契約違反。unknown: 応答不明(タイムアウト・通信エラー・5xx。課金された可能性があり、自動では再送しない) */
+      kind: z.enum(["retryable", "fatal", "unknown"]),
       message: z.string(),
       attempts: z.number().int().min(0),
       stopReason: z.string().optional(),

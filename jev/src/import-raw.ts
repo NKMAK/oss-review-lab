@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { IsoUtcSchema } from "@oss-review-lab/shared";
+import { DataRelativePathSchema, IsoUtcSchema } from "@oss-review-lab/shared";
 import { z } from "zod";
+import { acquireLockSync } from "./ledger";
 
 /** 入力データの破損・規則違反。メッセージに、ファイル名(と行番号)を含む。 */
 export class RawDataError extends Error {
@@ -128,7 +129,13 @@ export function writeFileAtomic(path: string, data: Buffer | string): void {
   renameSync(tmp, path);
 }
 
-export type IndexSource = { file: string; sha256: string; repo: string; fetchedAt: string };
+const SourceEntrySchema = z.object({
+  file: DataRelativePathSchema,
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  repo: z.string(),
+  fetchedAt: IsoUtcSchema,
+});
+export type IndexSource = z.infer<typeof SourceEntrySchema>;
 
 /** index.json を読む。無ければnull。 */
 export function readIndexFile(dataDir: string): Record<string, unknown> | null {
@@ -163,7 +170,34 @@ export type ImportRawOptions = { from: string; dataDir: string };
  * `from` の rc_*.jsonl / prs_*.json を全て検証してから、`<dataDir>/raw/` にコピーし、
  * `<dataDir>/index.json` の `sources` に記録する。1つでも不正なら、何も書かずに停止する。
  */
-export function importRaw({ from, dataDir }: ImportRawOptions): { imported: string[] } {
+export function importRaw(options: ImportRawOptions): { imported: string[] } {
+  // run・build-threads と同じロックで直列化する(並行実行で更新を失わない)
+  const release = acquireLockSync(options.dataDir);
+  try {
+    return importRawLocked(options);
+  } finally {
+    release();
+  }
+}
+
+/**
+ * 更新の順序: 検証(既存index含む) → 一時ファイルを全部書く(index、raw) → rawをrename → indexを最後にrename。
+ * 準備の途中で失敗しても、古い一貫した状態(raw と index)が残る。
+ */
+function importRawLocked({ from, dataDir }: ImportRawOptions): { imported: string[] } {
+  // 既存の index.json を先に検証する(壊れていたら、rawに触れずに停止。黙って空にしない)
+  const existing = readIndexFile(dataDir);
+  let previous: IndexSource[] = [];
+  if (existing !== null) {
+    const parsed = z.array(SourceEntrySchema).safeParse(existing.sources);
+    if (!parsed.success) {
+      throw new RawDataError(
+        `index.json: sources が配列ではない(または形式が不正)ため停止します(手動で確認してください): ${parsed.error.issues.map(formatIssue).join(" / ")}`,
+      );
+    }
+    previous = parsed.data;
+  }
+
   let names: string[];
   try {
     names = readdirSync(from).sort();
@@ -178,22 +212,40 @@ export function importRaw({ from, dataDir }: ImportRawOptions): { imported: stri
     return { name, buf, repo, fetchedAt: toIsoSeconds(statSync(path).mtime) };
   });
 
-  const entries: IndexSource[] = [];
-  for (const f of files) {
-    writeFileAtomic(join(dataDir, "raw", f.name), f.buf);
-    entries.push({ file: `raw/${f.name}`, sha256: sha256Hex(f.buf), repo: f.repo, fetchedAt: f.fetchedAt });
-  }
-
-  const existing = readIndexFile(dataDir) ?? {};
-  const previous = Array.isArray(existing.sources) ? (existing.sources as IndexSource[]) : [];
+  const entries: IndexSource[] = files.map((f) => ({
+    file: `raw/${f.name}`,
+    sha256: sha256Hex(f.buf),
+    repo: f.repo,
+    fetchedAt: f.fetchedAt,
+  }));
   const replaced = new Set(entries.map((e) => e.file));
   const sources = [...previous.filter((s) => !replaced.has(s.file)), ...entries].sort((a, b) =>
     a.file < b.file ? -1 : a.file > b.file ? 1 : 0,
   );
   const next: Record<string, unknown> = { schemaVersion: 1, sources };
-  if (existing.threads !== undefined) next.threads = existing.threads;
-  if (existing.runs !== undefined) next.runs = existing.runs;
-  writeFileAtomic(join(dataDir, "index.json"), `${JSON.stringify(next, null, 2)}\n`);
+  if (existing?.threads !== undefined) next.threads = existing.threads;
+  if (existing?.runs !== undefined) next.runs = existing.runs;
+
+  const rawDir = join(dataDir, "raw");
+  const indexPath = join(dataDir, "index.json");
+  const stagedIndex = `${indexPath}.tmp-${process.pid}`;
+  const staged: Array<{ tmp: string; dest: string }> = [];
+  try {
+    mkdirSync(rawDir, { recursive: true });
+    writeFileSync(stagedIndex, `${JSON.stringify(next, null, 2)}\n`);
+    for (const f of files) {
+      const dest = join(rawDir, f.name);
+      const tmp = join(rawDir, `.${f.name}.tmp-${process.pid}`);
+      writeFileSync(tmp, f.buf);
+      staged.push({ tmp, dest });
+    }
+    // ここまでで準備は完了。以降は rename だけ(rawを先に、indexを最後に)
+    for (const s of staged) renameSync(s.tmp, s.dest);
+    renameSync(stagedIndex, indexPath);
+  } catch (e) {
+    for (const p of [stagedIndex, ...staged.map((s) => s.tmp)]) rmSync(p, { force: true });
+    throw e;
+  }
 
   return { imported: files.map((f) => f.name) };
 }
