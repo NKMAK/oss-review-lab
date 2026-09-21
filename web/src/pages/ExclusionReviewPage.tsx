@@ -1,4 +1,11 @@
-/** /review/exclusion: 除外の目視確認。中身はタスク10が実装する(このファイルの中身だけを書き換える)。 */
+import { ExclusionReview } from "../features/exclusion/ExclusionReview";
+
+/** /review/exclusion: 除外の目視確認(中身は features/exclusion/)。 */
 export default function ExclusionReviewPage() {
-  return <section data-testid="page-exclusion-review" />;
+  return (
+    <section data-testid="page-exclusion-review">
+      <h2 className="mb-3 text-xl font-bold">除外の目視確認(is_ack)</h2>
+      <ExclusionReview />
+    </section>
+  );
 }
