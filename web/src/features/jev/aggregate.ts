@@ -44,8 +44,8 @@ function median(sortedAsc: number[]): number {
  * Run の Result を、確率の分布・応答時間・使用量と費用に集計する。
  *
  * 費用・使用量の注意: 1リクエストが複数の Result を返す。`cost` は、リクエストの最初の Result にだけ入り(他は null)、
- * `usage` は、同じリクエストの全 Result に重複して入る。なので、`usage` を Result ごとに足すと二重計上になる。
- * `cost` が入っている Result を「リクエストの先頭」として数え、費用・トークンは、その Result だけから合算する。
+ * `usage` と `latencyMs` は、同じリクエストの全 Result に重複して入りうる。なので、Result ごとに足すと二重計上になる。
+ * `cost` が入っている Result を「リクエストの先頭」として数え、費用・トークン・応答時間は、その Result だけから集計する。
  */
 export function aggregateResults(results: readonly Result[]): Aggregate {
   const byQuestion = new Map<string, QuestionDistribution & { confidenceSum: number; confidenceCount: number }>();
@@ -89,7 +89,12 @@ export function aggregateResults(results: readonly Result[]): Aggregate {
     meanConfidence: q.confidenceCount === 0 ? null : q.confidenceSum / q.confidenceCount,
   }));
 
-  const latencies = results.map((r) => r.latencyMs).sort((a, b) => a - b);
+  // 応答時間は、リクエスト単位で数える。1リクエストで複数の質問を送ると、同じ応答時間が
+  // そのリクエストの全 Result に重複して入る。費用と同じ規則で、cost が入っている Result(リクエストの先頭)だけを数える。
+  const latencies = results
+    .filter((r) => r.cost !== null)
+    .map((r) => r.latencyMs)
+    .sort((a, b) => a - b);
   const latency =
     latencies.length === 0
       ? null

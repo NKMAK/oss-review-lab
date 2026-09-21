@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "runId": "run-20260921-partial",
+  "model": "jev-0.0.0-dummy",
+  "variant": "parent-only",
+  "stateConfig": {},
+  "threadsSha256": "e6bde7eedd6e6b38df68eebb9145d559ec47305ce6e8b4b3c5d570ba7d5ab5e3",
+  "questionPlanHash": "f467297be2c409b665c6cba1fb1a5814e2f34373afb5e608bfa7fa524d835af6",
+  "questionDefs": [
+    {
+      "id": "design-api",
+      "hash": "f8cdcf883876beb29aaf95bc24db12f13327f29b389d08f248107a0394e76647"
+    },
+    {
+      "id": "types",
+      "hash": "7ea57c572935eb93cf6fe395854cd6ac333962dba75a9dfd66b8a0bb7358ac93"
+    },
+    {
+      "id": "bug-edge-case",
+      "hash": "52fef1fb39e7aa4a56614bf1481717f08800519975d722e233e470ab3b07fe14"
+    },
+    {
+      "id": "compatibility-release",
+      "hash": "f9ecec13335878ce0a2a62e4046f5539df0b88c4e82f9c149e3f3d065b4f0fb6"
+    },
+    {
+      "id": "tests",
+      "hash": "6b4a9cf8eb9c64545f2f9495e664c1ae6eeaabb7b4ec1347a00c394d4d5a5ec7"
+    },
+    {
+      "id": "readability-naming",
+      "hash": "8c53022a2c02e6e0b96ba97b4904f5f8311c88e3e78bd053d7393108da5b76c8"
+    },
+    {
+      "id": "docs-comments",
+      "hash": "3345f571bddbd66b2b1f5cf0bdceaca4802bbc8887c6fd9cabe089b010276c26"
+    },
+    {
+      "id": "security",
+      "hash": "6594c75a00bff71c659b994e2a4b1d0284dde2148943d375915c56df73b3bcf2"
+    },
+    {
+      "id": "performance",
+      "hash": "b1e27f5d85c1344b8719d40250c57a62515ed13e4377c708797b1f84caca44ac"
+    },
+    {
+      "id": "deps-build-tooling",
+      "hash": "1eda03e4dd13f6638ead0e97e9de29b7648d03c94621084f33e90601d08f1d48"
+    },
+    {
+      "id": "suggests-fix",
+      "hash": "758731e4ef58acabd9cb9e93d265c9948a0be850f4309d819803b2e91dcaa96f"
+    },
+    {
+      "id": "explains-reason",
+      "hash": "4ba8e681a5520584d52b881d07a8d314d6b2d00b53131f4c8e351b8c92cc0860"
+    },
+    {
+      "id": "question",
+      "hash": "fe460682369e41e575ca47e36deff240b5718d815715515c886cd8386eef05b9"
+    },
+    {
+      "id": "shares-context",
+      "hash": "92eecdb7754797c2cde0489e863c8a3ce01241db5c67658e4ca26297c656716e"
+    },
+    {
+      "id": "feature-request",
+      "hash": "a2327f9db9d74bbe53f870b25f564acf3a8d2f558c865dacfaa15593be84af46"
+    }
+  ],
+  "createdAt": "2026-09-21T03:00:00Z",
+  "finishedAt": null,
+  "status": "partial",
+  "results": [
+    {
+      "targetId": "1001",
+      "questionId": "design-api",
+      "questionType": "noul",
+      "questionDefHash": "f8cdcf883876beb29aaf95bc24db12f13327f29b389d08f248107a0394e76647",
+      "stateHash": "76deecfa59658432e3a8ee124564a0695e4bf39926ba3c00815950a2aad61605",
+      "variant": "parent-only",
+      "raw": {
+        "type": "noul",
+        "noul": 0
+      },
+      "probability": 0,
+      "confidence": null,
+      "latencyMs": 700,
+      "usage": {
+        "inputTokens": 900,
+        "outputTokens": 60
+      },
+      "cost": 0.0009,
+      "error": null
+    },
+    {
+      "targetId": "1001",
+      "questionId": "types",
+      "questionType": "noul",
+      "questionDefHash": "7ea57c572935eb93cf6fe395854cd6ac333962dba75a9dfd66b8a0bb7358ac93",
+      "stateHash": "76deecfa59658432e3a8ee124564a0695e4bf39926ba3c00815950a2aad61605",
+      "variant": "parent-only",
+      "raw": {
+        "type": "noul",
+        "noul": 0
+      },
+      "probability": 0,
+      "confidence": null,
+      "latencyMs": 700,
+      "usage": null,
+      "cost": null,
+      "error": null
+    },
+    {
+      "targetId": "1001",
+      "questionId": "security",
+      "questionType": "noul",
+      "questionDefHash": "6594c75a00bff71c659b994e2a4b1d0284dde2148943d375915c56df73b3bcf2",
+      "stateHash": "76deecfa59658432e3a8ee124564a0695e4bf39926ba3c00815950a2aad61605",
+      "variant": "parent-only",
+      "raw": {
+        "type": "noul",
+        "noul": 0.95
+      },
+      "probability": 0.95,
+      "confidence": null,
+      "latencyMs": 700,
+      "usage": null,
+      "cost": null,
+      "error": null
+    }
+  ]
+}

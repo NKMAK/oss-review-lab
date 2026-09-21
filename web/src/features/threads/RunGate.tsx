@@ -1,21 +1,30 @@
 import Alert from "@mui/material/Alert";
+import { useMemo } from "react";
 import type { ReactNode } from "react";
 import type { Result } from "@oss-review-lab/shared";
-import { useRun } from "../../data/DataContext";
+import { useResults } from "../../data/DataContext";
+import { selectViewResults } from "../../data/compose";
 import { Warnings } from "../../layout/Warnings";
+import { useViewParams } from "../../params/useViewParams";
 
 /**
- * 選択中のrunを読み込み、結果(Result[])を子に渡す。
- * runが1つも無ければ、結果なし(未判定)として子を描画する(スレッド自体は見られる)。
+ * 完了(complete)した全てのrunを合成した結果を読み込み、画面が使う結果(Result[])を子に渡す。
+ * is_ack は variant: reply、観点・言い方は URL の variant(既定 parent-only)。
+ * completeのrunが1つも無ければ、結果なし(未判定)として子を描画する(スレッド自体は見られる)。
  */
-export function RunGate({ runId, children }: { runId: string | null; children: (results: Result[]) => ReactNode }) {
-  const run = useRun(runId);
-  switch (run.status) {
+export function RunGate({ children }: { children: (results: Result[]) => ReactNode }) {
+  const state = useResults();
+  const [params] = useViewParams();
+  const selected = useMemo(
+    () => (state.status === "success" ? selectViewResults(state.results, params.variant) : []),
+    [state, params.variant],
+  );
+  switch (state.status) {
     case "idle":
       return (
         <>
           <Alert severity="info" role="note" className="mb-4">
-            Jevのrunがありません。ラベルは未判定です。
+            完了(complete)したrunがありません。ラベルは未判定です。
           </Alert>
           {children([])}
         </>
@@ -25,14 +34,14 @@ export function RunGate({ runId, children }: { runId: string | null; children: (
     case "error":
       return (
         <Alert severity="error" role="alert">
-          runの読み込みに失敗しました: {run.error.message}
+          runの読み込みに失敗しました: {state.error.message}
         </Alert>
       );
     case "success":
       return (
         <>
-          <Warnings warnings={run.warnings} />
-          {children(run.run.results)}
+          <Warnings warnings={state.warnings} />
+          {children(selected)}
         </>
       );
   }

@@ -1,21 +1,15 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import manifestText from "../../../../shared/fixtures/data/index.json?raw";
-import runAckText from "../../../../shared/fixtures/data/runs/run-20260921-ack.json?raw";
-import runAspectsText from "../../../../shared/fixtures/data/runs/run-20260921-aspects.json?raw";
 import threadsText from "../../../../shared/fixtures/data/threads/threads.jsonl?raw";
 import { appRoutes } from "../../routes";
+import { FIXTURE_FILES } from "../../testing/fixtures";
 
-const files: Record<string, string> = {
-  "/data/index.json": manifestText,
-  "/data/threads/threads.jsonl": threadsText,
-  "/data/runs/run-20260921-ack.json": runAckText,
-  "/data/runs/run-20260921-aspects.json": runAspectsText,
-};
+const files = FIXTURE_FILES;
 
-function stubFetch(over: Record<string, string> = {}) {
-  const table = { ...files, ...over };
+function stubFetch(over: Record<string, string | undefined> = {}) {
+  const table: Record<string, string | undefined> = { ...files, ...over };
   vi.stubGlobal(
     "fetch",
     vi.fn((url: string) => {
@@ -98,7 +92,7 @@ describe("/review/exclusion", () => {
 
   it("URLの閾値を使う(0.5): 0.5ちょうどの返信が除外され、要確認の帯は 0.5±0.1", async () => {
     stubFetch();
-    await renderAt("/review/exclusion?threshold=0.5");
+    await renderAt("/review/exclusion?ackThreshold=0.5");
     expect(readRows().map((r) => [r.replyId, r.status, r.band])).toEqual([
       ["4002", "除外", null],
       ["1002", "除外", null],
@@ -114,7 +108,7 @@ describe("/review/exclusion", () => {
 
   it("bandのクエリで、要確認の帯の幅が変わる", async () => {
     stubFetch();
-    await renderAt("/review/exclusion?threshold=0.8&band=0.2");
+    await renderAt("/review/exclusion?ackThreshold=0.8&band=0.2");
     expect(readRows().map((r) => [r.replyId, r.band])).toEqual([
       ["4002", "要確認"],
       ["1002", "要確認"],
@@ -133,13 +127,15 @@ describe("/review/exclusion", () => {
     fireEvent.change(screen.getByRole("slider"), { target: { value: "0.5" } });
     expect(screen.getByTestId("threshold-value").textContent).toBe("0.50");
     expect(screen.getByTestId("summary").textContent).toBe(`除外される返信: 6件 / 対象 7件${CODE_NOTE}`);
-    await waitFor(() => expect(router.state.location.search).toBe("?threshold=0.5&run=run-20260921-ack"));
-    expect(localStorage.getItem("oss-review-lab:threshold")).toBe("0.5");
+    await waitFor(() => expect(router.state.location.search).toBe("?ackThreshold=0.5&labelThreshold=0.5"));
+    expect(localStorage.getItem("oss-review-lab:ackThreshold")).toBe("0.5");
+    // 観点の閾値のキーには、書かない
+    expect(localStorage.getItem("oss-review-lab:labelThreshold")).toBe(null);
   });
 
   it("閾値を最大にしても、最小にしても、全ての返信に親コメントが残る(返信だけが除外される)", async () => {
     stubFetch();
-    await renderAt("/review/exclusion?threshold=1");
+    await renderAt("/review/exclusion?ackThreshold=1");
     const parents = [P4001, P1001, P4001, P2001, null, P4001, P1001, P1001];
     let rows = readRows();
     expect(rows.map((r) => r.status)).toEqual(["残る", "残る", "残る", "残る", "残る", "残る", "コード除外", "残る"]);
@@ -179,11 +175,56 @@ describe("/review/exclusion", () => {
     expect(screen.queryByRole("slider")).toBe(null);
   });
 
-  it("選択したrunに is_ack の結果が無いときも、空の状態を表示する", async () => {
-    stubFetch();
-    await renderAt("/review/exclusion?run=run-20260921-aspects");
+  it("completeのrunに is_ack の結果が無いとき(観点のrunだけ)も、空の状態を表示する", async () => {
+    const m = JSON.parse(manifestText);
+    m.runs = m.runs.filter((r: { runId: string }) => r.runId !== "run-20260921-ack");
+    stubFetch({ "/data/index.json": JSON.stringify(m) });
+    await renderAt("/review/exclusion");
     expect(screen.getByTestId("empty").textContent).toBe(
       "is_ack の結果がありません。返信の判定(run)を実行して、データを取り込んでください。",
+    );
+  });
+
+  it("観点のrunがあっても、runの切り替えなしで、返信が並ぶ(is_ack は別のrunから合成される)", async () => {
+    stubFetch();
+    await renderAt("/review/exclusion");
+    expect(readRows().map((r) => r.replyId)).toEqual(["4002", "1002", "4003", "2002", "5002", "4004", "1003", "1005"]);
+    expect(screen.queryByLabelText("run")).toBe(null);
+  });
+
+  it("除外の閾値の既定は0.8。観点の閾値(URL・localStorage)には影響されない", async () => {
+    localStorage.setItem("oss-review-lab:labelThreshold", "0.2");
+    stubFetch();
+    await renderAt("/review/exclusion?labelThreshold=0.1");
+    expect(screen.getByTestId("threshold-value").textContent).toBe("0.80");
+  });
+
+  it("除外の閾値は、localStorage(ackThreshold)から復元される。URLが優先。旧い `threshold` は使わない", async () => {
+    localStorage.setItem("oss-review-lab:ackThreshold", "0.6");
+    localStorage.setItem("oss-review-lab:threshold", "0.1");
+    stubFetch();
+    await renderAt("/review/exclusion");
+    expect(screen.getByTestId("threshold-value").textContent).toBe("0.60");
+    cleanup();
+    await renderAt("/review/exclusion?ackThreshold=0.9");
+    expect(screen.getByTestId("threshold-value").textContent).toBe("0.90");
+  });
+
+  it("スライダーを動かしても、保存済みの観点の閾値は変わらない。URLの観点の閾値も保たれる", async () => {
+    localStorage.setItem("oss-review-lab:labelThreshold", "0.3");
+    stubFetch();
+    const router = await renderAt("/review/exclusion?labelThreshold=0.7");
+    fireEvent.change(screen.getByRole("slider"), { target: { value: "0.9" } });
+    await waitFor(() => expect(router.state.location.search).toBe("?ackThreshold=0.9&labelThreshold=0.7"));
+    expect(localStorage.getItem("oss-review-lab:labelThreshold")).toBe("0.3");
+    expect(localStorage.getItem("oss-review-lab:ackThreshold")).toBe("0.9");
+  });
+
+  it("一部のrunが読めないときは、エラーを表示する", async () => {
+    stubFetch({ "/data/runs/run-20260921-aspects.json": undefined });
+    render(<RouterProvider router={createMemoryRouter(appRoutes, { initialEntries: ["/review/exclusion"] })} />);
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "runを読み込めませんでした: run-20260921-aspects: ファイルが見つかりません: /data/runs/run-20260921-aspects.json(データを取り込み済みか確認してください)",
     );
   });
 

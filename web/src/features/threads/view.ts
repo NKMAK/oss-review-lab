@@ -8,7 +8,7 @@ export type ThreadView = {
   thread: Thread;
   /** 親コメント。親が取得範囲外のスレッド(parent-missing)では null */
   root: Comment | null;
-  /** 選択中のrunに、この親の観点・言い方の結果があるか(無ければ未判定) */
+  /** この親の観点・言い方の結果があるか(無ければ未判定) */
   judged: boolean;
   /** 閾値以上のラベル(未判定なら空。届かなければ「その他」) */
   labels: DerivedLabels;
@@ -18,8 +18,11 @@ export type ThreadView = {
   excludedReplies: { id: string; reason: ExcludedReplyReason }[];
 };
 
+/** 2つの閾値: 観点・言い方のラベルと、返信の除外(is_ack)は、意味が違うので別。 */
+export type Thresholds = { labelThreshold: number; ackThreshold: number };
+
 /** 1スレッドの、Jevの結果に基づく表示用の導出。 */
-export function buildThreadView(thread: Thread, results: readonly Result[], threshold: number): ThreadView {
+export function buildThreadView(thread: Thread, results: readonly Result[], thresholds: Thresholds): ThreadView {
   const rootResults = results.filter((r) => r.targetId === thread.threadId && r.questionId !== IS_ACK_ID);
   const judged = rootResults.length > 0;
   const probabilities: Record<string, number> = {};
@@ -35,7 +38,7 @@ export function buildThreadView(thread: Thread, results: readonly Result[], thre
       continue;
     }
     const ack = results.find((r) => r.targetId === c.id && r.questionId === IS_ACK_ID);
-    if (ack !== undefined && ack.probability !== null && isAckExcluded(ack.probability, threshold)) {
+    if (ack !== undefined && ack.probability !== null && isAckExcluded(ack.probability, thresholds.ackThreshold)) {
       excludedReplies.push({ id: c.id, reason: "ack" });
     }
   }
@@ -44,7 +47,7 @@ export function buildThreadView(thread: Thread, results: readonly Result[], thre
     thread,
     root: thread.comments.find((c) => c.role === "root") ?? null,
     judged,
-    labels: judged ? deriveLabels(rootResults, threshold) : { aspects: [], styles: [] },
+    labels: judged ? deriveLabels(rootResults, thresholds.labelThreshold) : { aspects: [], styles: [] },
     probabilities,
     excludedReplies,
   };

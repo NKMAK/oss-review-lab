@@ -3,15 +3,12 @@ import Chip from "@mui/material/Chip";
 import Slider from "@mui/material/Slider";
 import { isAckExcluded, isReviewBand } from "@oss-review-lab/shared";
 import type { Comment } from "@oss-review-lab/shared";
-import { useSearchParams } from "react-router";
-import { useLoadedData, useRun } from "../../data/DataContext";
-import { readStoredThreshold } from "../../params/params";
+import { useMemo } from "react";
+import { selectViewResults } from "../../data/compose";
+import { useLoadedData, useResults } from "../../data/DataContext";
 import { useViewParams } from "../../params/useViewParams";
 import { buildExclusionRows } from "./rows";
 import type { ExclusionRow } from "./rows";
-
-/** この画面の既定の閾値(URLにも、localStorageにも無いとき)。共通の既定値(0.5)とは別。 */
-const DEFAULT_EXCLUSION_THRESHOLD = 0.8;
 
 const EMPTY_MESSAGE = "is_ack の結果がありません。返信の判定(run)を実行して、データを取り込んでください。";
 
@@ -91,18 +88,23 @@ function Row({ row, threshold, band }: { row: ExclusionRow; threshold: number; b
 export function ExclusionReview() {
   const { threads } = useLoadedData();
   const [params, update] = useViewParams();
-  const runState = useRun(params.run);
-  const [search] = useSearchParams();
+  const state = useResults();
+  const rows = useMemo(
+    () =>
+      state.status === "success"
+        ? buildExclusionRows(threads, selectViewResults(state.results, params.variant))
+        : [],
+    [state, threads, params.variant],
+  );
 
-  if (runState.status === "loading") return <p role="status" data-testid="loading">runを読み込み中…</p>;
-  if (runState.status === "error") {
+  if (state.status === "loading") return <p role="status" data-testid="loading">runを読み込み中…</p>;
+  if (state.status === "error") {
     return (
       <Alert severity="error" role="alert">
-        runを読み込めませんでした: {runState.error.message}
+        runを読み込めませんでした: {state.error.message}
       </Alert>
     );
   }
-  const rows = runState.status === "success" ? buildExclusionRows(threads, runState.run.results) : [];
   if (rows.length === 0) {
     return (
       <Alert severity="info" role="status" data-testid="empty">
@@ -111,11 +113,7 @@ export function ExclusionReview() {
     );
   }
 
-  const { band } = params;
-  // URLに閾値があればそれ(共通の解釈済みの値)、無ければ localStorage、それも無ければ 0.8
-  const threshold = search.has("threshold")
-    ? params.threshold
-    : (readStoredThreshold() ?? DEFAULT_EXCLUSION_THRESHOLD);
+  const { band, ackThreshold: threshold } = params;
   const codeExcluded = rows.filter((r) => r.codeExcluded).length;
   const targets = rows.length - codeExcluded;
   const excluded = rows.filter((r) => !r.codeExcluded && isAckExcluded(r.probability, threshold)).length;
@@ -138,7 +136,7 @@ export function ExclusionReview() {
             max={1}
             step={0.01}
             value={threshold}
-            onChange={(_, v) => update({ threshold: Array.isArray(v) ? (v[0] as number) : v })}
+            onChange={(_, v) => update({ ackThreshold: Array.isArray(v) ? (v[0] as number) : v })}
             sx={{ maxWidth: 400 }}
           />
         </div>

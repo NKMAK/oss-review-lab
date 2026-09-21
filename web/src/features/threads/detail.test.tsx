@@ -1,23 +1,12 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import manifestText from "../../../../shared/fixtures/data/index.json?raw";
-import runAckText from "../../../../shared/fixtures/data/runs/run-20260921-ack.json?raw";
-import runAspectsText from "../../../../shared/fixtures/data/runs/run-20260921-aspects.json?raw";
 import threadsText from "../../../../shared/fixtures/data/threads/threads.jsonl?raw";
 import { appRoutes } from "../../routes";
+import { FIXTURE_FILES } from "../../testing/fixtures";
 
-const RUN_ASPECTS = "run-20260921-aspects";
-const RUN_ACK = "run-20260921-ack";
-
-function stubFetch(over: Record<string, string> = {}) {
-  const files: Record<string, string> = {
-    "/data/index.json": manifestText,
-    "/data/threads/threads.jsonl": threadsText,
-    "/data/runs/run-20260921-ack.json": runAckText,
-    "/data/runs/run-20260921-aspects.json": runAspectsText,
-    ...over,
-  };
+function stubFetch(over: Record<string, string | undefined> = {}) {
+  const files: Record<string, string | undefined> = { ...FIXTURE_FILES, ...over };
   vi.stubGlobal(
     "fetch",
     vi.fn((url: string) => {
@@ -59,7 +48,7 @@ function readTimeline() {
 describe("/threads/:id(スレッド詳細)", () => {
   it("diffの該当箇所と、時系列のコメントと、各コメントのJevの結果(確率)が見える", async () => {
     stubFetch();
-    await renderAt(`/threads/1001?run=${RUN_ASPECTS}`);
+    await renderAt(`/threads/1001`);
     expect(screen.getByTestId("detail-pr-link").textContent).toBe("PR #11 Dummy PR 11");
     expect(screen.getByTestId("detail-pr-link").getAttribute("href")).toBe(
       "https://example.test/example-org/example-repo/pull/11",
@@ -105,20 +94,21 @@ describe("/threads/:id(スレッド詳細)", () => {
         "機能要望 確率 15%",
       ],
     });
-    // 返信は、このrunに結果が無いので、結果なし。bot・削除済みは、詳細では時系列に残し、除外の印を付ける
+    // 返信のJevの結果は、別のrun(ack)から合成される。既定の除外の閾値 0.8: 1002(0.97)が除外。
+    // bot・削除済みは、詳細では時系列に残し、除外の印を付ける
     expect(timeline.slice(1).map((c) => [c.id, c.role, c.author, c.createdAt, c.badge, c.results])).toEqual([
-      ["1002", "返信", "alice-dummy", "2026-01-01T01:00:00Z", null, []],
-      ["1003", "返信", "bot-dummy[bot]", "2026-01-01T02:00:00Z", "除外: bot", []],
+      ["1002", "返信", "alice-dummy", "2026-01-01T01:00:00Z", "除外: 同意・完了報告", ["同意・完了報告 確率 97%"]],
+      ["1003", "返信", "bot-dummy[bot]", "2026-01-01T02:00:00Z", "除外: bot", ["同意・完了報告 確率 30%"]],
       ["1004", "返信", "(削除済みユーザー)", "2026-01-01T03:00:00Z", "除外: 削除済みユーザー", []],
-      ["1005", "返信", "reviewer-dummy", "2026-01-01T04:00:00Z", null, []],
+      ["1005", "返信", "reviewer-dummy", "2026-01-01T04:00:00Z", null, ["同意・完了報告 確率 10%"]],
     ]);
   });
 
   it("返信のJevの結果は、is_ackの確率として出る。閾値以上なら除外の印が付く", async () => {
     stubFetch();
-    await renderAt(`/threads/1001?run=${RUN_ACK}&threshold=0.97`);
-    expect(readTimeline().map((c) => [c.id, c.badge, c.results])).toEqual([
-      ["1001", null, []],
+    await renderAt("/threads/1001?ackThreshold=0.97");
+    expect(readTimeline().map((c) => [c.id, c.badge, c.results.length === 15 ? "15件" : c.results])).toEqual([
+      ["1001", null, "15件"],
       ["1002", "除外: 同意・完了報告", ["同意・完了報告 確率 97%"]],
       ["1003", "除外: bot", ["同意・完了報告 確率 30%"]],
       ["1004", "除外: 削除済みユーザー", []],
@@ -128,21 +118,21 @@ describe("/threads/:id(スレッド詳細)", () => {
 
   it("noulの結果に「confidence」の語を使わない", async () => {
     stubFetch();
-    await renderAt(`/threads/1001?run=${RUN_ASPECTS}`);
+    await renderAt(`/threads/1001`);
     expect((document.body.textContent ?? "").toLowerCase().includes("confidence")).toBe(false);
   });
 
   it("一覧へ戻るリンクは、絞り込みのクエリを保つ", async () => {
     stubFetch();
-    await renderAt(`/threads/1001?run=${RUN_ASPECTS}&aspects=types`);
+    await renderAt(`/threads/1001?aspects=types`);
     expect(screen.getByTestId("back-link").getAttribute("href")).toBe(
-      `/threads?threshold=0.5&aspects=types&run=${RUN_ASPECTS}`,
+      "/threads?ackThreshold=0.8&labelThreshold=0.5&aspects=types",
     );
   });
 
   it("diffが無いスレッドは「diffなし」。親が無いスレッドは、時系列を返信だけで出す", async () => {
     stubFetch();
-    await renderAt(`/threads/5001?run=${RUN_ASPECTS}`);
+    await renderAt(`/threads/5001`);
     expect(screen.getByTestId("diff").textContent).toBe("diffなし");
     expect(readTimeline().map((c) => [c.id, c.role])).toEqual([["5002", "返信"]]);
   });
@@ -155,6 +145,36 @@ describe("/threads/:id(スレッド詳細)", () => {
   });
 });
 
+describe("合成・variant", () => {
+  it("観点の結果は選んだvariantのもの。with-replies を選ぶと、そのrunの値になる(is_ack は reply のまま)", async () => {
+    stubFetch();
+    await renderAt("/threads/4001");
+    let t = readTimeline();
+    expect(t[0]!.results.slice(0, 2)).toEqual(["設計・API 確率 55%", "型 確率 10%"]);
+    expect(t[1]!.results).toEqual(["同意・完了報告 確率 99%"]);
+
+    cleanup();
+    await renderAt("/threads/4001?variant=with-replies");
+    t = readTimeline();
+    expect(t[0]!.results.slice(0, 2)).toEqual(["設計・API 確率 20%", "型 確率 10%"]);
+    expect(t[0]!.results[4]).toBe("テスト 確率 90%");
+    expect(t[1]!.results).toEqual(["同意・完了報告 確率 99%"]);
+  });
+
+  it("partialのrunの値(1001の security 0.95)は使わない", async () => {
+    stubFetch();
+    await renderAt("/threads/1001");
+    expect(readTimeline()[0]!.results[7]).toBe("セキュリティ 確率 1%");
+  });
+
+  it("runの読み込みに失敗したら、エラーを表示する", async () => {
+    stubFetch({ "/data/runs/run-20260921-aspects.json": undefined });
+    const router = createMemoryRouter(appRoutes, { initialEntries: ["/threads/1001"] });
+    render(<RouterProvider router={router} />);
+    expect((await screen.findByRole("alert")).textContent).toContain("runの読み込みに失敗しました: run-20260921-aspects");
+  });
+});
+
 describe("本文とdiffは生のテキスト(XSS)", () => {
   it("<script> は実行されず、文字として表示される", async () => {
     const evil = "<script>window.__xssDetail = 1</script><img src=x onerror=\"window.__xssDetail = 2\">";
@@ -163,7 +183,7 @@ describe("本文とdiffは生のテキスト(XSS)", () => {
     lines[0].comments[1].body = evil;
     lines[0].diffHunk = `@@ -1 +1 @@\n+${evil}`;
     stubFetch({ "/data/threads/threads.jsonl": lines.map((l) => JSON.stringify(l)).join("\n") + "\n" });
-    await renderAt(`/threads/1001?run=${RUN_ASPECTS}`);
+    await renderAt(`/threads/1001`);
     const t = readTimeline();
     expect([t[0]!.body, t[1]!.body]).toEqual([evil, evil]);
     expect(texts(screen.getByTestId("diff"), "[data-testid=diff-line]")).toEqual(["@@ -1 +1 @@", `+${evil}`]);
