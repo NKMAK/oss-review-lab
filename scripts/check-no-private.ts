@@ -7,8 +7,9 @@ import { pathToFileURL } from 'node:url';
 
 export type Violation = { path: string; reason: string };
 
-const FIXTURES = 'shared/fixtures/';
-const FIXTURES_DATA = 'shared/fixtures/data/';
+// ダミーデータの置き場所(2か所)。*.jsonl の許可と、本物のURLの検査の両方がこの範囲を使う
+const DUMMY_DIRS = ['shared/fixtures/', 'jev/test/fixtures/'] as const;
+const inDummyDir = (p: string): boolean => DUMMY_DIRS.some((d) => p.startsWith(d));
 const REAL_URL_MARKERS = ['github.com/nestjs', 'api.github.com'] as const;
 
 const basename = (p: string): string => p.slice(p.lastIndexOf('/') + 1);
@@ -16,20 +17,20 @@ const basename = (p: string): string => p.slice(p.lastIndexOf('/') + 1);
 export function findViolations(trackedPaths: string[], readContent: (path: string) => string): Violation[] {
   const out: Violation[] = [];
   for (const path of trackedPaths) {
-    const inFixturesData = path.startsWith(FIXTURES_DATA);
-    if (!inFixturesData && (path.startsWith('data/') || path.includes('/data/'))) {
-      out.push({ path, reason: 'data/ 配下のファイルが追跡されている' });
+    // 対象はリポジトリ直下の data/ だけ(web/src/data/ などのソースは対象外)
+    if (path.startsWith('data/')) {
+      out.push({ path, reason: 'ルート直下の data/ 配下のファイルが追跡されている' });
     }
     if (basename(path) === '.env') {
       out.push({ path, reason: '.env が追跡されている' });
     }
-    if (path.endsWith('.jsonl') && !path.startsWith(FIXTURES)) {
-      out.push({ path, reason: 'shared/fixtures 以外の *.jsonl が追跡されている' });
+    if (path.endsWith('.jsonl') && !inDummyDir(path)) {
+      out.push({ path, reason: 'ダミーの置き場所(shared/fixtures/、jev/test/fixtures/)以外の *.jsonl が追跡されている' });
     }
     if (path === 'jev/pricing.json') {
       out.push({ path, reason: 'jev/pricing.json が追跡されている' });
     }
-    if (path.startsWith(FIXTURES)) {
+    if (inDummyDir(path)) {
       const content = readContent(path);
       for (const marker of REAL_URL_MARKERS) {
         if (content.includes(marker)) {
