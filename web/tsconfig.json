@@ -3,11 +3,7 @@
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "types": ["vite/client"],
-    "paths": {
-      "react": ["../node_modules/.pnpm/node_modules/@types/react"],
-      "react/*": ["../node_modules/.pnpm/node_modules/@types/react/*"]
-    }
+    "types": ["vite/client"]
   },
   "include": ["src", "vitest.config.ts", "vite.config.ts"]
 }
