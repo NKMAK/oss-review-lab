@@ -10,8 +10,8 @@ const base = {
   isAck: false,
   split: false,
   budget: 3.5,
-  concurrency: 3,
-  replyIsAckThreshold: 0.5,
+  // 安全側の既定: 並列数1(明示したときだけ増やす)。閾値は既定値を持たない
+  concurrency: 1,
 };
 
 describe("parseCommand", () => {
@@ -46,6 +46,16 @@ describe("parseCommand", () => {
         replyIsAckThreshold: 0.8,
       },
     });
+  });
+
+  it("--variant with-replies は --reply-is-ack-threshold が必須(既定値を持たない)。--is-ack と parent-only では不要", () => {
+    expect(() => parseCommand(["run", "--all", "--variant", "with-replies"], env)).toThrow("--reply-is-ack-threshold が必須です");
+    expect(() => parseCommand(["run", "--dry-run", "--variant", "with-replies"], env)).toThrow("--reply-is-ack-threshold が必須です");
+    const ok = parseCommand(["run", "--all", "--variant", "with-replies", "--reply-is-ack-threshold", "0.8"], env);
+    expect(ok.command === "run" && ok.options.replyIsAckThreshold).toBe(0.8);
+    expect(() => parseCommand(["run", "--all", "--is-ack", "--variant", "with-replies"], env)).not.toThrow();
+    const po = parseCommand(["run", "--all"], env);
+    expect(po.command === "run" && po.options.replyIsAckThreshold).toBe(undefined);
   });
 
   it("--all / --is-ack", () => {

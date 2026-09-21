@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { ResultSchema, type Result } from "@oss-review-lab/shared";
 import { atomicWriteJson } from "./atomic-write";
+import { pickAllowedRaw } from "./jev-client";
 
 /** キーの順序に依存しない、決定的なJSON文字列。 */
 export function canonicalJson(value: unknown): string {
@@ -84,6 +85,7 @@ export class ResultCache {
       questionDefHash: result.questionDefHash,
       model,
     });
-    await atomicWriteJson(path, { schemaVersion: 1, model, result });
+    // 許可リストを通す(他人のコメント本文がエコーされていても、キャッシュに残さない)
+    await atomicWriteJson(path, { schemaVersion: 1, model, result: { ...result, raw: pickAllowedRaw(result.raw) } });
   }
 }

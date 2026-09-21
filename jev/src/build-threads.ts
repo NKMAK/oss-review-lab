@@ -14,6 +14,7 @@ import {
   writeFileAtomic,
 } from "./import-raw";
 import type { RawComment, RawPr } from "./import-raw";
+import { acquireLockSync } from "./ledger";
 
 export type SourceComment = { repo: string; /** `<file>:<行番号>`(エラー表示用) */ source: string; raw: RawComment };
 export type SourcePr = { repo: string; raw: RawPr };
@@ -184,6 +185,16 @@ export function readRawDir(dataDir: string): { comments: SourceComment[]; prs: S
 
 /** 生データからスレッドを組み、`threads/threads.jsonl` と `index.json`(threads)を書く。 */
 export function runBuildThreads({ dataDir }: { dataDir: string }): { count: number; sha256: string } {
+  // import-raw・run と同じロックで直列化する
+  const release = acquireLockSync(dataDir);
+  try {
+    return runBuildThreadsLocked({ dataDir });
+  } finally {
+    release();
+  }
+}
+
+function runBuildThreadsLocked({ dataDir }: { dataDir: string }): { count: number; sha256: string } {
   const threads = buildThreads(readRawDir(dataDir));
   const text = threads.map((t) => `${JSON.stringify(t)}\n`).join("");
   const sha256 = sha256Hex(text);

@@ -1,6 +1,7 @@
 import { z } from "zod";
 // shared/package.json に main/exports が無く、パッケージ名では型を解決できないため、型のみ相対で参照する(実行時には消える)。
 import type { Result } from "@oss-review-lab/shared";
+import { redactSecrets } from "./redact";
 
 export const JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 export const DEFAULT_TIMEOUT_MS = 30_000;
@@ -76,13 +77,15 @@ const ResponseSchema = z.object({
   usage: z.object({ input_tokens: TokenCount, output_tokens: TokenCount }),
 });
 
+/**
+ * 1回の試行の結果。エラー本文は、(stateのエコーを含み得るので)保持しない。状態コードと固定のコードだけ。
+ * - retry: 429/529。再送してよい(処理・課金は済んでいない)
+ * - unknown: 応答不明(タイムアウト・通信エラー・その他の5xx・本文の読み取り失敗)。冪等キーが無いので、再送しない
+ * - fatal: 4xx。再送しない(課金なし)
+ */
 type Attempt =
   | { ok: true; text: string }
-  | { ok: false; retryable: boolean; message: string; raw: unknown };
-
-function redact(text: string, apiKey: string): string {
-  return apiKey === "" ? text : text.split(apiKey).join("[REDACTED]");
-}
+  | { ok: false; outcome: "retry" | "unknown" | "fatal"; message: string };
 
 async function attemptOnce(
   req: JevCallInput,
@@ -99,24 +102,64 @@ async function attemptOnce(
       body,
       signal: controller.signal,
     });
-    const text = redact(await res.text(), req.apiKey);
-    if (res.status >= 200 && res.status < 300) return { ok: true, text };
-    const retryable = res.status === 429 || res.status === 529 || res.status >= 500;
-    return { ok: false, retryable, message: `HTTP ${res.status}: ${text}`, raw: text };
-  } catch (e) {
-    if (controller.signal.aborted) {
-      return { ok: false, retryable: true, message: `timeout after ${timeoutMs}ms`, raw: null };
+    if (res.status >= 200 && res.status < 300) {
+      // 本文の読み取りも、タイムアウトの対象(切断されたら、処理は済んでいる可能性があるので応答不明)
+      return { ok: true, text: await res.text() };
     }
-    const msg = redact(e instanceof Error ? e.message : String(e), req.apiKey);
-    return { ok: false, retryable: true, message: `network error: ${msg}`, raw: null };
+    // エラー本文は読まない(保存もしない)
+    void res.body?.cancel().catch(() => undefined);
+    const message = `HTTP ${res.status}`;
+    if (res.status === 429 || res.status === 529) return { ok: false, outcome: "retry", message };
+    if (res.status >= 500) return { ok: false, outcome: "unknown", message };
+    return { ok: false, outcome: "fatal", message };
+  } catch {
+    // 例外の中身(キーやURLを含み得る)は使わない
+    return { ok: false, outcome: "unknown", message: controller.signal.aborted ? "timeout" : "network error" };
   } finally {
     clearTimeout(timer);
   }
 }
 
 /**
- * Jev API を1回呼び(再試行込み)、質問ごとの Result に投影する。
- * 応答が契約に合わない場合は、リクエスト全体を fatal にする(raw は残す)。
+ * 保存してよい応答の許可リスト。`model`・`usage`・`answers`(型・確率・選択肢)だけを残す。
+ * 説明文・エコーされたstate・未知のフィールドは落とす(他人のコメント本文を保存物に残さない)。
+ * 契約に合わない値は、null(保存しない)。
+ */
+export function pickAllowedRaw(json: unknown): unknown {
+  const parsed = ResponseSchema.safeParse(json);
+  if (!parsed.success) return null;
+  const { model, usage, answers } = parsed.data;
+  return {
+    model,
+    usage: { input_tokens: usage.input_tokens, output_tokens: usage.output_tokens },
+    answers: Object.fromEntries(
+      Object.entries(answers).map(([id, a]) => {
+        if (a.type === "noul") return [id, { type: "noul", noul: a.noul }];
+        if (a.type === "choice") {
+          return [id, { type: "choice", choice: a.choice, probabilities: a.probabilities, confidence: a.confidence }];
+        }
+        return [id, { type: "score", score: a.score, probabilities: a.probabilities, confidence: a.confidence }];
+      }),
+    ),
+  };
+}
+
+/** 送信するリクエスト本文(JSON文字列)。予約額の見積もり(大きさ)も、これを使う。 */
+export function buildRequestBody(state: unknown, model: string, questions: JevQuestion[]): string {
+  return JSON.stringify({
+    state,
+    model,
+    questions: Object.fromEntries(
+      questions.map((q) => [q.id, { type: q.type, instructions: q.instructions, criteria: q.criteria }]),
+    ),
+  });
+}
+
+/**
+ * Jev API を1回呼び、質問ごとの Result に投影する。
+ * 自動で再送するのは 429・529 だけ(最大 MAX_ATTEMPTS 回)。タイムアウト・通信エラー・その他の5xxは、
+ * 課金済みかもしれず冪等キーも無いので、再送せず error.kind: "unknown" を返す。
+ * 応答が契約に合わない場合は、リクエスト全体を fatal にする(応答は保存しない)。
  */
 export async function callJev(req: JevCallInput): Promise<JevCallOutcome> {
   const ids = new Set<string>();
@@ -130,13 +173,7 @@ export async function callJev(req: JevCallInput): Promise<JevCallOutcome> {
   const now = req.now ?? Date.now;
   const timeoutMs = req.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  const body = JSON.stringify({
-    state: req.state,
-    model: req.model,
-    questions: Object.fromEntries(
-      req.questions.map((q) => [q.id, { type: q.type, instructions: q.instructions, criteria: q.criteria }]),
-    ),
-  });
+  const body = buildRequestBody(req.state, req.model, req.questions);
 
   const start = now();
   let last: Attempt | undefined;
@@ -144,7 +181,7 @@ export async function callJev(req: JevCallInput): Promise<JevCallOutcome> {
   while (attempts < MAX_ATTEMPTS) {
     attempts++;
     last = await attemptOnce(req, body, fetchImpl, timeoutMs);
-    if (last.ok || !last.retryable) break;
+    if (last.ok || last.outcome !== "retry") break;
     if (attempts < MAX_ATTEMPTS) {
       const base = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** (attempts - 1));
       await sleep(Math.round(base * (0.5 + random())));
@@ -163,32 +200,30 @@ export async function callJev(req: JevCallInput): Promise<JevCallOutcome> {
     latencyMs,
     cost: null,
   });
-  const failAll = (
-    kind: "retryable" | "fatal",
-    message: string,
-    raw: unknown,
-    model: string | null,
-  ): JevCallOutcome => ({
-    model,
-    results: req.questions.map((q) => ({
-      ...base(q),
-      raw,
-      probability: null,
-      confidence: null,
-      usage: null,
-      error: { kind, message, attempts },
-    })),
-  });
+  // 保存物に載るものは、最後に必ずキーのマスクを通す(応答・例外・入れ子のJSONを再帰的に)
+  const finish = (outcome: JevCallOutcome): JevCallOutcome => redactSecrets(outcome, req.apiKey);
+  const failAll = (kind: "retryable" | "fatal" | "unknown", message: string, model: string | null): JevCallOutcome =>
+    finish({
+      model,
+      results: req.questions.map((q) => ({
+        ...base(q),
+        raw: null,
+        probability: null,
+        confidence: null,
+        usage: null,
+        error: { kind, message, attempts },
+      })),
+    });
 
   if (!attempt.ok) {
-    return failAll(attempt.retryable ? "retryable" : "fatal", attempt.message, attempt.raw, null);
+    return failAll(attempt.outcome === "retry" ? "retryable" : attempt.outcome, attempt.message, null);
   }
 
   let json: unknown;
   try {
     json = JSON.parse(attempt.text);
   } catch {
-    return failAll("fatal", "response is not valid JSON", attempt.text, null);
+    return failAll("fatal", "response is not valid JSON", null);
   }
   const modelId =
     typeof json === "object" && json !== null && typeof (json as { model?: unknown }).model === "string"
@@ -197,43 +232,38 @@ export async function callJev(req: JevCallInput): Promise<JevCallOutcome> {
 
   const parsed = ResponseSchema.safeParse(json);
   if (!parsed.success) {
-    const issue = parsed.error.issues[0]!;
-    return failAll("fatal", `invalid response: ${issue.path.join(".")}: ${issue.message}`, json, modelId);
+    // zodの詳細(値を含み得る)は使わない
+    return failAll("fatal", "invalid response: schema mismatch", modelId);
   }
   const { answers, usage } = parsed.data;
   const sent = new Set(req.questions.map((q) => q.id));
   const missing = req.questions.filter((q) => !(q.id in answers)).map((q) => q.id);
   const extra = Object.keys(answers).filter((k) => !sent.has(k));
   if (missing.length > 0 || extra.length > 0) {
-    return failAll(
-      "fatal",
-      `question ids mismatch: missing=[${missing.join(",")}] extra=[${extra.join(",")}]`,
-      json,
-      modelId,
-    );
+    return failAll("fatal", `question ids mismatch: missing=[${missing.join(",")}] extra=${extra.length}`, modelId);
   }
   const mismatch = req.questions.find((q) => answers[q.id]!.type !== q.type);
   if (mismatch) {
     return failAll(
       "fatal",
       `answer type mismatch for ${mismatch.id}: sent ${mismatch.type}, got ${answers[mismatch.id]!.type}`,
-      json,
       modelId,
     );
   }
 
-  return {
+  const raw = pickAllowedRaw(json);
+  return finish({
     model: parsed.data.model,
     results: req.questions.map((q) => {
       const a = answers[q.id]!;
       return {
         ...base(q),
-        raw: json,
+        raw,
         probability: a.type === "noul" ? a.noul : null,
         confidence: a.type === "noul" ? null : a.confidence,
         usage: { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens },
         error: null,
       };
     }),
-  };
+  });
 }

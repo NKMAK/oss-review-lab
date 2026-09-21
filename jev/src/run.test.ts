@@ -14,8 +14,11 @@ import type { RunJevOptions } from "./run";
 const API_KEY = "test-key-not-real";
 const NOW = new Date("2026-09-22T00:00:00.000Z");
 
-/** 単価: 100入力トークン=0.1、10出力トークン=0.1 → 1リクエスト 0.2(浮動小数の誤差が出ない値) */
-const PRICING = { schemaVersion: 1, inputUsdPerToken: 0.001, outputUsdPerToken: 0.01 };
+/**
+ * 単価: 入力は0(予約額は、リクエストの大きさ×入力単価が加わるため、既存の数値を保つ)、10出力トークン=0.2 → 1リクエスト 0.2。
+ * 入力単価を持つ場合の、予約額の大きさへの依存は、専用のテストで見る。
+ */
+const PRICING = { schemaVersion: 1, inputUsdPerToken: 0, outputUsdPerToken: 0.02 };
 const USAGE = { input_tokens: 100, output_tokens: 10 };
 
 let dir: string;
@@ -176,7 +179,9 @@ describe("予算ガード: 費用はリクエスト単位で1回だけ", () => {
 
     const ledger = readLedger();
     const id = ledger[0]!.requestId as string;
-    expect(id.endsWith(`@${out.runId}`)).toBe(true);
+    // リクエストの同一性は、内容(state・質問定義・モデル)で決まる。runId は含めない
+    expect(id.includes("@")).toBe(false);
+    expect(id).toMatch(/^[0-9a-f]{32}$/);
     const at = "2026-09-22T00:00:00.000Z";
     expect(ledger).toEqual([
       { schemaVersion: 1, at, event: "reserved", requestId: id, runId: out.runId, amount: 0.5 },
@@ -234,11 +239,83 @@ describe("予算ガード: 上限", () => {
 
   it("並列3でも、確定費用と予約額の合計は上限を超えない", async () => {
     seedThreads(6);
+    // 使用量の実績が無い最初のrunは並列数1になるため、先に実績を作る
+    await runJev(opts({ fetch: mockFetch().fetch, mode: "limit", limit: 1, questionIds: ["design-api"] }));
+    seedThreads(6, (i) => ({ bodyKey: `p-${i}` }));
     const { fetch, calls } = mockFetch();
-    const out = await runJev(opts({ fetch, concurrency: 3, budget: 0.5, maxCostPerRequest: 0.2, questionIds: ["design-api"] }));
+    // 実績(出力10トークン)から、予約額は 10 × 2(安全率) × 0.02 = 0.4。上限 0.9 なら2件まで
+    const out = await runJev(opts({ fetch, concurrency: 3, budget: 1.1, maxCostPerRequest: undefined, questionIds: ["design-api"] }));
     expect(out.kind).toBe("run");
     expect(calls.length).toBe(2);
-    expect(await ledgerTotals(0.5)).toEqual({ limit: 0.5, spent: 0.4, held: 0 });
+    expect(await ledgerTotals(1.1)).toEqual({ limit: 1.1, spent: 0.2 + 0.4, held: 0 });
+  });
+
+  it("上限 $5 相当(小さい値)・3並列・各予約が実費の半分のとき、overrun を記録し、それ以降の送信を止め、runを partial にする", async () => {
+    seedThreads(1);
+    // 使用量の実績を作る(出力10トークン → 予約額は 0.4)
+    await runJev(opts({ fetch: mockFetch().fetch, mode: "limit", limit: 1, questionIds: ["design-api"] }));
+    seedThreads(6, (i) => ({ bodyKey: `o-${i}` }));
+
+    // 3件が出そろうまで応答を返さない(3件とも予約済みで、実費が確定する前に送信されていることを保証する)
+    let arrived = 0;
+    let openBarrier!: () => void;
+    const barrier = new Promise<void>((r) => (openBarrier = r));
+    const { fetch, calls } = mockFetch(async (_i, call) => {
+      if (++arrived === 3) openBarrier();
+      await barrier;
+      // 実費は、予約額(0.4)の2倍: 出力40トークン × 0.02 = 0.8
+      return okResponse(call, { input_tokens: 100, output_tokens: 40 });
+    });
+    const out = await runJev(opts({ fetch, concurrency: 3, budget: 1.2 + 0.2, maxCostPerRequest: undefined, questionIds: ["design-api"] }));
+    if (out.kind !== "run") throw new Error("run expected");
+
+    expect(calls.length).toBe(3); // 6件のうち、それ以降の送信は止まる
+    expect(out.status).toBe("partial");
+    expect(out.halted).toContain("overrun");
+    const overruns = readLedger().filter((e) => e.event === "overrun");
+    expect(overruns.length).toBeGreaterThanOrEqual(1);
+    expect(overruns[0]).toMatchObject({ reserved: 0.4, cost: 0.8 });
+    // 実費の合計は、上限を超えるが、実行中の分(並列数)までに収まる
+    const totals = await ledgerTotals(1.4);
+    expect(totals.spent).toBeCloseTo(0.2 + 3 * 0.8, 10);
+    expect(totals.held).toBe(0);
+    // 送信した3件だけが結果になり、残りの3件は、送られていない
+    const run = readRun(out.runId);
+    expect(run.results.filter((r) => r.error === null).length).toBe(3);
+    expect(run.results.length).toBe(3);
+  });
+});
+
+describe("予約額はリクエストの大きさに応じて大きくなる", () => {
+  it("大きい state は、大きい予約額(入力単価があるとき)", async () => {
+    writeFileSync(pricingPath, JSON.stringify({ schemaVersion: 1, inputUsdPerToken: 0.0001, outputUsdPerToken: 0.02 }));
+    seedThreads(1);
+    await runJev(opts({ fetch: mockFetch().fetch, mode: "limit", limit: 1, questionIds: ["design-api"], maxCostPerRequest: 3 }));
+    seedThreads(2, (i) => ({ bodyKey: i === 0 ? "s" : "L".repeat(5000) }));
+    const out = await runJev(opts({ fetch: mockFetch().fetch, maxCostPerRequest: undefined, questionIds: ["design-api"], budget: 10 }));
+    const amounts = readLedger()
+      .filter((e) => e.event === "reserved" && e.runId === out.runId)
+      .map((e) => e.amount as number);
+    expect(amounts.length).toBe(2);
+    expect(amounts[1]! - amounts[0]!).toBeGreaterThan(0.4); // 約5000バイト × 0.0001
+  });
+});
+
+describe("最初の試走は並列数1", () => {
+  it("使用量の実績が無いとき、--concurrency が3でも、同時に送るのは1件だけ", async () => {
+    seedThreads(4);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const { fetch, calls } = mockFetch(async (_i, call) => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight--;
+      return okResponse(call);
+    });
+    await runJev(opts({ fetch, concurrency: 3, questionIds: ["design-api"] }));
+    expect(calls.length).toBe(4);
+    expect(maxInFlight).toBe(1);
   });
 });
 
@@ -247,9 +324,85 @@ describe("予算ガード: 応答不明(sent のまま)は自動で再送しな�
     seedThreads(1);
     const first = mockFetch(() => new Error("connection reset"));
     const out = await runJev(opts({ fetch: first.fetch, questionIds: ["design-api"] }));
-    expect(first.calls.length).toBe(4); // callJevの再試行(最大4回)
+    expect(first.calls.length).toBe(1); // 通信エラーは再送しない(二重課金の防止)
     return out;
   }
+
+  it.each([
+    ["通信エラー", () => new Error("connection reset")],
+    ["HTTP 500", () => new Response("oops", { status: 500 })],
+    ["HTTP 503", () => new Response("oops", { status: 503 })],
+  ])("%s は、fetch が1回だけで、unknown として記録され、台帳に sent のまま残る(再送されない)", async (_n, make) => {
+    seedThreads(2);
+    const { fetch, calls } = mockFetch(make);
+    const out = await runJev(opts({ fetch, questionIds: ["design-api"] }));
+    if (out.kind !== "run") throw new Error("run expected");
+    expect(calls.length).toBe(2); // 2件のリクエストが、それぞれ1回だけ
+    expect(out.status).toBe("partial");
+    expect(readRun(out.runId).results.map((r) => r.error?.kind)).toEqual(["unknown", "unknown"]);
+    expect(readRun(out.runId).results.map((r) => r.error?.attempts)).toEqual([1, 1]);
+    expect(out.unresolved.length).toBe(2);
+    expect(readLedger().map((e) => e.event)).toEqual(["reserved", "sent", "reserved", "sent"]);
+    expect(await ledgerTotals()).toEqual({ limit: 3.5, spent: 0, held: 1 });
+  });
+
+  it("429・529 は、再送される(応答を受けており、処理されていない)", async () => {
+    seedThreads(1);
+    const { fetch, calls } = mockFetch((i, call) => (i === 0 ? new Response("x", { status: 429 }) : i === 1 ? new Response("x", { status: 529 }) : okResponse(call)));
+    const out = await runJev(opts({ fetch, questionIds: ["design-api"] }));
+    expect(calls.length).toBe(3);
+    expect(out.status).toBe("complete");
+    expect(await ledgerTotals()).toEqual({ limit: 3.5, spent: 0.2, held: 0 });
+  });
+
+  it("過去のrunの応答不明が残っていると、--resolve なしの新しいrunは、(別の内容でも)送信せずに停止し、一覧を出す", async () => {
+    await leaveUnresolved();
+    seedThreads(2, (i) => ({ bodyKey: `other-${i}` })); // 応答不明のものとは別の内容
+    const logs: string[] = [];
+    const second = mockFetch();
+    const out = await runJev(opts({ fetch: second.fetch, questionIds: ["design-api"], log: (l) => logs.push(l) }));
+    if (out.kind !== "run") throw new Error("run expected");
+    expect(second.calls.length).toBe(0);
+    expect(out.status).toBe("partial");
+    expect(out.halted).toContain("応答不明");
+    expect(out.halted).toContain("--resolve retry|skip");
+    expect(out.unresolved.length).toBe(1);
+    expect(logs.join("\n")).toContain(out.unresolved[0]!.requestId);
+    expect(readLedger().map((e) => e.event)).toEqual(["reserved", "sent"]);
+  });
+
+  it("--resolve skip は永続する: 次のrun(別の runId)でも、skip したリクエストは再送されない。--resolve retry を明示したときだけ再送する", async () => {
+    await leaveUnresolved();
+    const skipRun = mockFetch();
+    const r2 = await runJev(opts({ fetch: skipRun.fetch, questionIds: ["design-api"], resolve: "skip" }));
+    expect(skipRun.calls.length).toBe(0);
+
+    const next = mockFetch();
+    const r3 = await runJev(opts({ fetch: next.fetch, questionIds: ["design-api"] }));
+    expect(next.calls.length).toBe(0);
+    expect(r3.runId).not.toBe(r2.runId);
+    if (r3.kind !== "run") throw new Error("run expected");
+    expect(r3.status).toBe("partial");
+    expect(readRun(r3.runId).results.map((r) => r.error?.stopReason)).toEqual(["skipped"]);
+
+    const retry = mockFetch();
+    const r4 = await runJev(opts({ fetch: retry.fetch, questionIds: ["design-api"], resolve: "retry" }));
+    expect(retry.calls.length).toBe(1);
+    expect(readRun(r4.runId).status).toBe("complete");
+    expect(readLedger().map((e) => e.event)).toEqual(["reserved", "sent", "resolved", "resolved", "reserved", "sent", "settled"]);
+  });
+
+  it("確定済みのリクエストは、キャッシュが失われても、再送しない(二重課金の防止)", async () => {
+    seedThreads(1);
+    await runJev(opts({ fetch: mockFetch().fetch, questionIds: ["design-api"] }));
+    rmSync(join(dataDir, "cache"), { recursive: true, force: true });
+    const again = mockFetch();
+    const out = await runJev(opts({ fetch: again.fetch, questionIds: ["design-api"] }));
+    expect(again.calls.length).toBe(0);
+    if (out.kind !== "run") throw new Error("run expected");
+    expect(out.status).toBe("partial");
+    expect(readRun(out.runId).results.map((r) => r.error?.stopReason)).toEqual(["already-billed"]);
+  });
 
   it("resolve が無ければ、再送せず、保留として報告する", async () => {
     await leaveUnresolved();
@@ -387,7 +540,7 @@ describe("単価・予約額のガード", () => {
     expect(existsSync(join(dataDir, ".lock"))).toBe(false);
   });
 
-  it("使用量が確認できた後は、直近のrunの平均トークンから予約額を決める(--max-cost-per-request 不要)", async () => {
+  it("使用量が確認できた後は、過去の出力トークンの最大 × 安全率2 + リクエストの大きさ から予約額を決める(--max-cost-per-request 不要)。実費の2倍", async () => {
     seedThreads(2);
     const a = mockFetch();
     await runJev(opts({ fetch: a.fetch, mode: "limit", limit: 1 }));
@@ -396,7 +549,7 @@ describe("単価・予約額のガード", () => {
     const out = await runJev(opts({ fetch: b.fetch, maxCostPerRequest: undefined }));
     expect(b.calls.length).toBe(2);
     const ledger = readLedger().filter((e) => e.runId === out.runId);
-    expect(ledger.map((e) => e.amount)).toEqual([0.2, 0.2]);
+    expect(ledger.map((e) => e.amount)).toEqual([0.4, 0.4]); // 実績の出力10トークン × 安全率2 × 単価0.02(入力単価は0)
   });
 
   it("APIキーが無ければ、実行を拒否する(キー名だけを示す)", async () => {
@@ -496,7 +649,7 @@ describe("部分失敗・run と Manifest の保存", () => {
     expect(run.status).toBe("partial");
     expect(run.results.map((r) => [r.targetId, r.probability, r.cost, r.error])).toEqual([
       ["1000", 0.9, 0.2, null],
-      ["1010", null, null, { kind: "fatal", message: "HTTP 422: bad input", attempts: 1 }],
+      ["1010", null, null, { kind: "fatal", message: "HTTP 422", attempts: 1 }],
       ["1020", 0.9, 0.2, null],
     ]);
     expect(await ledgerTotals()).toEqual({ limit: 3.5, spent: 0.4, held: 0 });
@@ -603,6 +756,27 @@ describe("with-replies と is_ack", () => {
     expect(ra.results.map((r) => r.stateHash)).not.toEqual(rb.results.map((r) => r.stateHash));
   });
 
+  it("with-replies で閾値(replyIsAckThreshold)が未指定なら、既定値を置かず、拒否する(送信0回・台帳もrunも作らない)", async () => {
+    seedThreads(1);
+    const { fetch, calls } = mockFetch();
+    await expect(
+      runJev(opts({ fetch, variant: "with-replies", replyIsAckThreshold: undefined, questionIds: ["design-api"] })),
+    ).rejects.toThrow("--reply-is-ack-threshold");
+    await expect(
+      planDryRun(opts({ fetch, mode: "dry-run", apiKey: null, variant: "with-replies", replyIsAckThreshold: undefined })),
+    ).rejects.toThrow("--reply-is-ack-threshold");
+    expect(calls.length).toBe(0);
+    expect(existsSync(join(dataDir, "ledger.jsonl"))).toBe(false);
+    expect(existsSync(join(dataDir, "runs"))).toBe(false);
+    expect(existsSync(join(dataDir, ".lock"))).toBe(false);
+  });
+
+  it("parent-only と is_ack では、閾値は不要", async () => {
+    seedThreads(1);
+    await expect(runJev(opts({ fetch: mockFetch().fetch, replyIsAckThreshold: undefined, questionIds: ["design-api"] }))).resolves.toBeDefined();
+    await expect(runJev(opts({ fetch: mockFetch().fetch, replyIsAckThreshold: undefined, isAck: true, variant: "reply" }))).resolves.toBeDefined();
+  });
+
   it("is_ack の結果が無い返信は除外の根拠が無いので残す", async () => {
     seedThreads(1);
     const { fetch, calls } = mockFetch();
@@ -622,7 +796,44 @@ describe("キーの保護", () => {
     expect(out.kind).toBe("run");
     expect(allFileText(dataDir).includes(API_KEY)).toBe(false);
     expect(logs.join("\n").includes(API_KEY)).toBe(false);
-    expect(readRun(out.runId).results[0]!.error).toEqual({ kind: "fatal", message: "HTTP 401: invalid token [REDACTED]", attempts: 1 });
+    expect(readRun(out.runId).results[0]!.error).toEqual({ kind: "fatal", message: "HTTP 401", attempts: 1 });
+  });
+
+  it("APIキーが、応答・例外に、エンコードされて含まれても、保存物(run・キャッシュ・台帳)にもログにも出ない", async () => {
+    seedThreads(3);
+    const b64 = Buffer.from(API_KEY).toString("base64");
+    const logs: string[] = [];
+    const { fetch } = mockFetch((i, call) => {
+      if (i === 0) return new Error(`connect failed ${API_KEY} ${encodeURIComponent(API_KEY)}`);
+      if (i === 1) return new Response(JSON.stringify({ error: b64, key: API_KEY }), { status: 500 });
+      const answers = Object.fromEntries(Object.keys(call.body.questions).map((id) => [id, { type: "noul", noul: 0.9 }]));
+      return new Response(JSON.stringify({ model: `jev-${API_KEY}`, answers, usage: USAGE }), { status: 200 });
+    });
+    await runJev(opts({ fetch, log: (l) => logs.push(l), questionIds: ["design-api"] }));
+    for (const dir of ["runs", "cache"]) expect(allFileText(join(dataDir, dir)).includes(API_KEY)).toBe(false);
+    for (const secret of [API_KEY, b64, encodeURIComponent(API_KEY)]) {
+      expect(allFileText(join(dataDir, "runs")).includes(secret)).toBe(false);
+      expect(readFileSync(join(dataDir, "ledger.jsonl"), "utf8").includes(secret)).toBe(false);
+      expect(allFileText(join(dataDir, "cache")).includes(secret)).toBe(false);
+      expect(logs.join("\n").includes(secret)).toBe(false);
+    }
+  });
+
+  it("APIが state(他人のコメント本文)をエコーしたエラー本文・応答を返しても、保存物(run・キャッシュ・台帳)に残らない", async () => {
+    seedThreads(3);
+    const { fetch } = mockFetch((i, call) => {
+      const echoed = JSON.stringify(call.body.state);
+      if (i === 0) return new Response(echoed, { status: 422 });
+      if (i === 1) return new Response(echoed, { status: 500 });
+      const answers = Object.fromEntries(
+        Object.keys(call.body.questions).map((id) => [id, { type: "noul", noul: 0.9, explanation: echoed }]),
+      );
+      return new Response(JSON.stringify({ model: "jev-1.13.0", answers, usage: USAGE, echoed_state: call.body.state }), { status: 200 });
+    });
+    await runJev(opts({ fetch, questionIds: ["design-api"] }));
+    for (const dir of ["runs", "cache"]) expect(allFileText(join(dataDir, dir)).includes("root body")).toBe(false);
+    expect(readFileSync(join(dataDir, "ledger.jsonl"), "utf8").includes("root body")).toBe(false);
+    expect(readdirSync(join(dataDir, "cache")).length).toBe(1); // 成功した1件だけがキャッシュされている
   });
 
   describe("loadApiKey", () => {

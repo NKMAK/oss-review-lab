@@ -62,31 +62,64 @@ export function assertPricingForMode(mode: RunMode, pricing: Pricing | null): vo
   }
 }
 
-export type ReserveAmountInput = {
+/** 過去の出力トークンの実績(1質問あたりの最大)。まだ無い(初回)なら null を渡す。 */
+export type OutputHistory = { maxOutputTokensPerQuestion: number };
+
+/** 過去の最大に対する安全率。実費が予約額を超えたら overrun として検出する(最後の砦)。 */
+export const OUTPUT_SAFETY_FACTOR = 2;
+
+export const NEED_MAX_COST_MESSAGE =
+  "使用量が未確認(または単価が未設定)のため、--max-cost-per-request が必須です(最初は --limit 1 --questions is_ack で試してください)";
+
+export type ReserveInput = {
+  /** 送るリクエスト本文(JSON文字列)。この大きさ(UTF-8のバイト数)を、入力トークン数の上限とする */
+  requestBody: string;
+  /** このリクエストに含める質問の数 */
+  questionCount: number;
+  history: OutputHistory | null;
+  pricing: Pricing | null;
   /** `--max-cost-per-request` */
   maxCostPerRequest?: number;
-  /** 直近のrunの平均使用量。まだ無ければ null(初回) */
-  averageUsage: Usage | null;
-  pricing: Pricing | null;
 };
 
+export type ReserveDecision = { ok: true; amount: number } | { ok: false; reason: string };
+
 /**
- * 1リクエストあたりの予約額を決める。
- * - `--max-cost-per-request` があれば、それを使う(保守的な上限)。
- * - 無ければ、直近のrunの平均トークン × 単価。使用量が未確認(初回)か単価が未設定なら、必須として拒否する。
+ * 1リクエストの予約額(実費の上限でなければならない)。
+ * - 入力: リクエスト本文のUTF-8バイト数を、入力トークン数の上限とみなす(1トークンは、少なくとも1バイト)。
+ * - 出力: 過去の実績があれば、1質問あたりの最大 × 安全率 × 質問数。無ければ(初回)、`--max-cost-per-request` が必須で、その値を上限とする。
+ * - `--max-cost-per-request` があるとき、上限を保証できない(入力費用や見積もりがそれを超える)なら、予約できない(送らない)。
  */
-export function decideReserveAmount(input: ReserveAmountInput): number {
-  const { maxCostPerRequest, averageUsage, pricing } = input;
-  if (maxCostPerRequest !== undefined) {
-    if (!Number.isFinite(maxCostPerRequest) || maxCostPerRequest <= 0) {
-      throw new Error(`--max-cost-per-request は有限で正の数値にしてください: ${String(maxCostPerRequest)}`);
+export function estimateReserve(input: ReserveInput): ReserveDecision {
+  const { requestBody, questionCount, history, pricing, maxCostPerRequest } = input;
+  if (maxCostPerRequest !== undefined && (!Number.isFinite(maxCostPerRequest) || maxCostPerRequest <= 0)) {
+    throw new Error(`--max-cost-per-request は有限で正の数値にしてください: ${String(maxCostPerRequest)}`);
+  }
+  const inputCost = pricing === null ? null : Buffer.byteLength(requestBody, "utf8") * pricing.inputUsdPerToken;
+
+  if (history === null || pricing === null) {
+    if (maxCostPerRequest === undefined) throw new Error(NEED_MAX_COST_MESSAGE);
+    if (inputCost !== null && inputCost > maxCostPerRequest) {
+      return {
+        ok: false,
+        reason: `リクエストの大きさから求めた入力費用(${inputCost})が --max-cost-per-request(${maxCostPerRequest})を超えるため、上限を保証できず送信しません`,
+      };
     }
-    return maxCostPerRequest;
+    return { ok: true, amount: maxCostPerRequest };
   }
-  if (averageUsage === null || pricing === null) {
-    throw new Error(
-      "使用量が未確認(または単価が未設定)のため、--max-cost-per-request が必須です(最初は --limit 1 --questions is_ack で試してください)",
-    );
+
+  // 浮動小数点の誤差(20.000000000000004 など)で、1トークン余計に数えない
+  const outputTokens = Math.max(
+    1,
+    Math.ceil(history.maxOutputTokensPerQuestion * OUTPUT_SAFETY_FACTOR * questionCount - 1e-9),
+  );
+  const amount = (inputCost ?? 0) + outputTokens * pricing.outputUsdPerToken;
+  if (maxCostPerRequest !== undefined && amount > maxCostPerRequest) {
+    return {
+      ok: false,
+      reason: `見積もりの予約額(${amount})が --max-cost-per-request(${maxCostPerRequest})を超えるため、送信しません`,
+    };
   }
-  return computeCost(averageUsage, pricing);
+  return { ok: true, amount };
 }
+
