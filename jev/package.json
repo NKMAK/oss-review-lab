@@ -1,0 +1,20 @@
+{
+  "name": "@oss-review-lab/jev",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  },
+  "dependencies": {
+    "@oss-review-lab/shared": "workspace:*",
+    "dotenv": "^18.0.1",
+    "zod": "^4.6.5"
+  }
+}

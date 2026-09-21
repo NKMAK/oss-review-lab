@@ -1,0 +1,10 @@
+{
+  "name": "oss-review-lab",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "typecheck": "pnpm -r typecheck",
+    "check:private": "echo 'check:private is a stub (implemented in task 13)'"
+  }
+}
