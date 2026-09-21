@@ -1,0 +1,6 @@
+{
+  "_note": "これは例(ダミーの単価)。公式の料金ページを見て、実際の値に置き換え、jev/pricing.json として保存する(pricing.json はコミットしない)。",
+  "schemaVersion": 1,
+  "inputUsdPerToken": 0.000001,
+  "outputUsdPerToken": 0.000001
+}
