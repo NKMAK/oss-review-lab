@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "file": "raw/rc_example-org_example-repo.jsonl",
+      "sha256": "1c3ed0f82d0f18c7388e94efe32df725b1ba3d51eca7fc8e5ab2fdbe0fc67bdf",
+      "repo": "example-org/example-repo",
+      "fetchedAt": "2026-09-20T00:00:00Z"
+    }
+  ],
+  "threads": {
+    "file": "threads/threads.jsonl",
+    "sha256": "e6bde7eedd6e6b38df68eebb9145d559ec47305ce6e8b4b3c5d570ba7d5ab5e3",
+    "count": 5
+  },
+  "runs": [
+    {
+      "runId": "run-20260921-ack",
+      "status": "complete",
+      "file": "runs/run-20260921-ack.json",
+      "sha256": "c75890ebbe801186c5ff7f17e2597841f4bb61a572a31bbfe0f08525195a3778",
+      "createdAt": "2026-09-21T00:00:00Z",
+      "variant": "reply"
+    },
+    {
+      "runId": "run-20260921-aspects",
+      "status": "partial",
+      "file": "runs/run-20260921-aspects.json",
+      "sha256": "8dbe3ebc8a9b710aef15806870a94cb6c5b43cd4733a6a0bfcd11001f2f1e5e8",
+      "createdAt": "2026-09-21T01:00:00Z",
+      "variant": "parent-only"
+    }
+  ]
+}

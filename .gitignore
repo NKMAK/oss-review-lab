@@ -8,3 +8,5 @@ test-results/
 *.log
 dist/
 jev/pricing.json
+# fixturesのダミーデータは追跡する(本物のdata/は無視のまま)
+!shared/fixtures/data/
