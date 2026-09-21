@@ -7,7 +7,9 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "import-raw": "tsx src/import-raw.ts",
-    "build-threads": "tsx src/build-threads.ts"
+    "build-threads": "tsx src/build-threads.ts",
+    "run": "tsx src/cli.ts run",
+    "report": "tsx src/cli.ts report"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
