@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import manifestJson from "../fixtures/data/index.json";
 import runAck from "../fixtures/data/runs/run-20260921-ack.json";
 import runAspects from "../fixtures/data/runs/run-20260921-aspects.json";
+import runPartial from "../fixtures/data/runs/run-20260921-partial.json";
+import runWithReplies from "../fixtures/data/runs/run-20260921-with-replies.json";
 import threadsJsonl from "../fixtures/data/threads/threads.jsonl?raw";
 import { ManifestSchema, RunSchema } from "./run";
 import { ThreadSchema } from "./thread";
@@ -10,6 +12,8 @@ import { deriveLabels, isCodeExcludedReply } from "./derive";
 const runFiles: Record<string, unknown> = {
   "runs/run-20260921-ack.json": runAck,
   "runs/run-20260921-aspects.json": runAspects,
+  "runs/run-20260921-partial.json": runPartial,
+  "runs/run-20260921-with-replies.json": runWithReplies,
 };
 const threads = threadsJsonl
   .split("\n")
@@ -23,8 +27,11 @@ describe("fixtures", () => {
     expect(m.threads.count).toBe(threads.length);
     expect(m.runs.map((r) => [r.runId, r.status])).toEqual([
       ["run-20260921-ack", "complete"],
-      ["run-20260921-aspects", "partial"],
+      ["run-20260921-aspects", "complete"],
+      ["run-20260921-with-replies", "complete"],
+      ["run-20260921-partial", "partial"],
     ]);
+    expect(m.runs.map((r) => r.variant)).toEqual(["reply", "parent-only", "with-replies", "parent-only"]);
   });
 
   it("全Runがスキーマを通り、Manifestの目録とRun自身が一致する", () => {
@@ -77,8 +84,53 @@ describe("fixtures", () => {
     expect(r1001.filter((r) => r.error !== null).map((r) => r.questionId)).toEqual(["performance"]);
   });
 
+  it("複数の質問を1リクエストで送った形: cost と usage はリクエストの先頭の Result にだけ入り、応答時間は同じリクエストで同じ値", () => {
+    const m = ManifestSchema.parse(manifestJson);
+    for (const entry of m.runs.filter((r) => r.variant !== "reply")) {
+      const run = RunSchema.parse(runFiles[entry.file]);
+      const byTarget = new Map<string, typeof run.results>();
+      for (const r of run.results) byTarget.set(r.targetId, [...(byTarget.get(r.targetId) ?? []), r]);
+      for (const [targetId, rs] of byTarget) {
+        const [head, ...rest] = rs;
+        expect([entry.runId, targetId, head?.cost, head?.usage]).toEqual([
+          entry.runId,
+          targetId,
+          expect.any(Number),
+          expect.objectContaining({ inputTokens: expect.any(Number), outputTokens: expect.any(Number) }),
+        ]);
+        expect(rest.map((r) => [r.cost, r.usage])).toEqual(rest.map(() => [null, null]));
+        expect(new Set(rs.map((r) => r.latencyMs)).size).toBe(1);
+      }
+    }
+  });
+
+  it("is_ack のrunは、返信ごとに1リクエスト(全Resultが cost を持つ)", () => {
+    const run = RunSchema.parse(runAck);
+    expect(run.results.every((r) => r.cost !== null && r.usage !== null)).toBe(true);
+  });
+
+  it("with-replies のrunは、4001だけが判定済みで、parent-only と違うラベルになる", () => {
+    const withReplies = RunSchema.parse(runWithReplies);
+    expect([...new Set(withReplies.results.map((r) => r.targetId))]).toEqual(["4001"]);
+    expect(withReplies.results.every((r) => r.variant === "with-replies")).toBe(true);
+    expect(deriveLabels(withReplies.results, 0.5)).toEqual({ aspects: ["tests"], styles: ["other"] });
+    const parentOnly = RunSchema.parse(runAspects).results.filter((r) => r.targetId === "4001");
+    expect(deriveLabels(parentOnly, 0.5)).toEqual({ aspects: ["design-api"], styles: ["question"] });
+  });
+
+  it("partial のrunは、使われたら分かる値(1001に security 0.95)を持つ", () => {
+    const run = RunSchema.parse(runPartial);
+    expect(run.status).toBe("partial");
+    expect(run.finishedAt).toBe(null);
+    expect(run.results.map((r) => [r.targetId, r.questionId, r.probability])).toEqual([
+      ["1001", "design-api", 0],
+      ["1001", "types", 0],
+      ["1001", "security", 0.95],
+    ]);
+  });
+
   it("全ファイルのURLが https://example.test/ だけで、本物のGitHubを含まない", () => {
-    const all = [JSON.stringify(manifestJson), threadsJsonl, JSON.stringify(runAck), JSON.stringify(runAspects)].join("\n");
+    const all = [JSON.stringify(manifestJson), threadsJsonl, JSON.stringify(runAck), JSON.stringify(runAspects), JSON.stringify(runPartial), JSON.stringify(runWithReplies)].join("\n");
     const urls = all.match(/https?:\/\/[^\s"\\]+/g) ?? [];
     expect(urls.filter((u) => !u.startsWith("https://example.test/"))).toEqual([]);
     expect(/github\.com|nestjs/i.test(all)).toBe(false);

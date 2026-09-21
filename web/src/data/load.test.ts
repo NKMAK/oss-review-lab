@@ -3,14 +3,10 @@ import manifestText from "../../../shared/fixtures/data/index.json?raw";
 import runAckText from "../../../shared/fixtures/data/runs/run-20260921-ack.json?raw";
 import runAspectsText from "../../../shared/fixtures/data/runs/run-20260921-aspects.json?raw";
 import threadsText from "../../../shared/fixtures/data/threads/threads.jsonl?raw";
+import { FIXTURE_FILES } from "../testing/fixtures";
 import { DataLoadError, loadData, loadRun } from "./load";
 
-const files: Record<string, string> = {
-  "/data/index.json": manifestText,
-  "/data/threads/threads.jsonl": threadsText,
-  "/data/runs/run-20260921-ack.json": runAckText,
-  "/data/runs/run-20260921-aspects.json": runAspectsText,
-};
+const files = FIXTURE_FILES;
 
 /** 外部境界(fetch)だけをモックする。値が number ならHTTPステータス、Error なら通信失敗。 */
 function stubFetch(over: Record<string, string | number | Error> = {}) {
@@ -56,7 +52,8 @@ describe("loadData", () => {
         .filter((l) => l !== "")
         .map((l) => JSON.parse(l)),
     );
-    expect(data.defaultRunId).toBe("run-20260921-ack");
+    // 新しい順で最初の complete(partial の run-20260921-partial は選ばない)
+    expect(data.defaultRunId).toBe("run-20260921-with-replies");
     expect(data.warnings).toEqual([]);
   });
 

@@ -7,9 +7,11 @@ import { useViewParams } from "../params/useViewParams";
 
 /** /jev: Jev結果の確認(確率の分布・応答時間・使用量と費用)。正解データとの比較は行わない。 */
 export default function JevPage() {
-  const { manifest } = useLoadedData();
+  const { manifest, defaultRunId } = useLoadedData();
   const [params, update] = useViewParams();
-  const run = useRun(params.run);
+  // /jev は、run単位で表示する。URLに run が無ければ、既定のrun(新しい順で最初のcomplete)
+  const runId = params.run ?? defaultRunId;
+  const run = useRun(runId);
 
   return (
     <section data-testid="page-jev" className="p-4">
@@ -25,7 +27,7 @@ export default function JevPage() {
           <div className="mb-4">
             <label>
               run{" "}
-              <select value={params.run ?? ""} onChange={(e) => update({ run: e.target.value })}>
+              <select value={runId ?? ""} onChange={(e) => update({ run: e.target.value })}>
                 {manifest.runs.map((r) => (
                   <option key={r.runId} value={r.runId}>
                     {r.runId}({r.status})

@@ -24,10 +24,26 @@
     },
     {
       "runId": "run-20260921-aspects",
-      "status": "partial",
+      "status": "complete",
       "file": "runs/run-20260921-aspects.json",
-      "sha256": "8dbe3ebc8a9b710aef15806870a94cb6c5b43cd4733a6a0bfcd11001f2f1e5e8",
+      "sha256": "7c396bededcae5d7bb27d3c5101fc7494d444c2e16fd1f74b4ab4284834ec30b",
       "createdAt": "2026-09-21T01:00:00Z",
+      "variant": "parent-only"
+    },
+    {
+      "runId": "run-20260921-with-replies",
+      "status": "complete",
+      "file": "runs/run-20260921-with-replies.json",
+      "sha256": "73d0cde10e595f0c152c819d78941c9cb4f5dfb0c6d963d8e82e0c00c4d9f34d",
+      "createdAt": "2026-09-21T02:00:00Z",
+      "variant": "with-replies"
+    },
+    {
+      "runId": "run-20260921-partial",
+      "status": "partial",
+      "file": "runs/run-20260921-partial.json",
+      "sha256": "6c0ad21a1f3ddac770e65a7ab7a08f18e413973d2fc76f7fff541c0747060571",
+      "createdAt": "2026-09-21T03:00:00Z",
       "variant": "parent-only"
     }
   ]

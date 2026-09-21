@@ -59,6 +59,7 @@ function thread(id: string, over: Partial<Thread> = {}, replyKinds: ("human" | "
   };
 }
 
+const T = { labelThreshold: 0.5, ackThreshold: 0.5 };
 const params = (over: Partial<ViewParams>): ViewParams => ({ ...DEFAULT_VIEW_PARAMS, ...over });
 
 describe("buildThreadView", () => {
@@ -72,7 +73,7 @@ describe("buildThreadView", () => {
         result("1", "question", 0.9),
         result("other-thread", "tests", 0.99),
       ],
-      0.5,
+      T,
     );
     expect({ labels: v.labels, probabilities: v.probabilities, judged: v.judged }).toEqual({
       labels: { aspects: ["design-api"], styles: ["question"] },
@@ -82,12 +83,12 @@ describe("buildThreadView", () => {
   });
 
   it("親の結果が無い(その観点のrunではない)ときは未判定で、ラベルを持たない", () => {
-    const v = buildThreadView(thread("1"), [result("1", "is_ack", 0.9)], 0.5);
+    const v = buildThreadView(thread("1"), [result("1", "is_ack", 0.9)], T);
     expect({ labels: v.labels, judged: v.judged }).toEqual({ labels: { aspects: [], styles: [] }, judged: false });
   });
 
   it("どの質問も閾値に届かなければ「その他」", () => {
-    const v = buildThreadView(thread("1"), [result("1", "types", 0.1)], 0.5);
+    const v = buildThreadView(thread("1"), [result("1", "types", 0.1)], T);
     expect(v.labels).toEqual({ aspects: ["other"], styles: ["other"] });
   });
 
@@ -96,13 +97,32 @@ describe("buildThreadView", () => {
     const v = buildThreadView(
       t,
       [result("1-r0", "is_ack", 0.5), result("1-r1", "is_ack", 0.49), result("1-r2", "is_ack", null)],
-      0.5,
+      T,
     );
     expect(v.excludedReplies).toEqual([
       { id: "1-r0", reason: "ack" },
       { id: "1-r3", reason: "bot" },
       { id: "1-r4", reason: "unknown" },
     ]);
+  });
+});
+
+describe("buildThreadView: 2つの閾値", () => {
+  it("観点のラベルは labelThreshold、返信の除外は ackThreshold で決まり、互いに影響しない", () => {
+    const t = thread("1", {}, ["human", "human"]);
+    const results = [
+      result("1", "types", 0.6),
+      result("1-r0", "is_ack", 0.85),
+      result("1-r1", "is_ack", 0.6),
+    ];
+    const at = (labelThreshold: number, ackThreshold: number) => {
+      const v = buildThreadView(t, results, { labelThreshold, ackThreshold });
+      return [v.labels.aspects, v.excludedReplies.map((e) => e.id)];
+    };
+    expect(at(0.5, 0.8)).toEqual([["types"], ["1-r0"]]);
+    expect(at(0.7, 0.8)).toEqual([["other"], ["1-r0"]]);
+    expect(at(0.5, 0.9)).toEqual([["types"], []]);
+    expect(at(0.5, 0.6)).toEqual([["types"], ["1-r0", "1-r1"]]);
   });
 });
 
@@ -122,7 +142,7 @@ describe("filterThreadViews", () => {
     thread("4", { excludedReason: "bot-root" }),
     thread("5", { comments: [{ ...thread("5").comments[0]!, role: "reply", isPrAuthor: null }] }),
   ];
-  const views = threads.map((t) => buildThreadView(t, results, 0.5));
+  const views = threads.map((t) => buildThreadView(t, results, T));
   const ids = (p: Partial<ViewParams>) => filterThreadViews(views, params(p)).map((v) => v.thread.threadId);
 
   it("絞り込み無しなら、除外スレッド以外を全部出す", () => {

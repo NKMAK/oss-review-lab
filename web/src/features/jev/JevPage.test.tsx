@@ -32,19 +32,19 @@ function result(over: Partial<Result>): Result {
 const USAGE_A = { inputTokens: 100, outputTokens: 10 };
 const USAGE_B = { inputTokens: 200, outputTokens: 20 };
 
-/** 2リクエスト(1001, 1002)。usageは同じリクエストのResultに重複、costは先頭だけ。tests の1件は失敗 */
+/** 2リクエスト(1001, 1002)。応答時間とusageは同じリクエストのResultに重複、costは先頭だけ。tests の1件は失敗 */
 const COMPLETE_RESULTS: Result[] = [
-  result({ targetId: "1001", questionId: "design-api", probability: 0.9, latencyMs: 100, usage: USAGE_A, cost: 0.01 }),
+  result({ targetId: "1001", questionId: "design-api", probability: 0.9, latencyMs: 200, usage: USAGE_A, cost: 0.01 }),
   result({ targetId: "1001", questionId: "types", probability: 0.75, latencyMs: 200, usage: USAGE_A }),
   result({
     targetId: "1001",
     questionId: "tests",
     probability: null,
-    latencyMs: 300,
+    latencyMs: 200,
     error: { kind: "fatal", message: "boom", attempts: 3 },
   }),
   result({ targetId: "1002", questionId: "design-api", probability: 0.05, latencyMs: 1000, usage: USAGE_B, cost: 0.02 }),
-  result({ targetId: "1002", questionId: "types", probability: 0.75, latencyMs: 400, usage: USAGE_B }),
+  result({ targetId: "1002", questionId: "types", probability: 0.75, latencyMs: 1000, usage: USAGE_B }),
 ];
 
 const CHOICE_RESULTS: Result[] = [
@@ -117,9 +117,10 @@ describe("/jev", () => {
       ["質問数", "3"],
       ["結果数", "5"],
       ["エラー", "1件(確率の分布に含めない)"],
-      ["応答時間(最小)", "100 ms"],
-      ["応答時間(平均)", "400 ms"],
-      ["応答時間(中央値)", "300 ms"],
+      // 応答時間は、リクエスト単位(1001: 200ms が3件に重複、1002: 1000ms が2件に重複 → 2リクエスト)
+      ["応答時間(最小)", "200 ms"],
+      ["応答時間(平均)", "600 ms"],
+      ["応答時間(中央値)", "600 ms"],
       ["応答時間(最大)", "1000 ms"],
       ["リクエスト数", "2"],
       ["入力トークン", "300"],
@@ -213,7 +214,7 @@ describe("/jev", () => {
       ["質問数", "1"],
       ["結果数", "2"],
     ]);
-    expect(router.state.location.search).toBe("?threshold=0.5&run=run-d");
+    expect(router.state.location.search).toBe("?ackThreshold=0.8&labelThreshold=0.5&run=run-d");
   });
 
   it("partialのrunは、集計から外し、その旨を注記する", async () => {

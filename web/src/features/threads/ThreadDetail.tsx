@@ -61,7 +61,7 @@ function ThreadBody({ threadId, results }: { threadId: string; results: Result[]
   const [params] = useViewParams();
   const thread = threads.find((t) => t.threadId === threadId);
   if (thread === undefined) return null;
-  const view = buildThreadView(thread, results, params.threshold);
+  const view = buildThreadView(thread, results, params);
   const excluded = new Map(view.excludedReplies.map((e) => [e.id, e.reason]));
 
   return (
@@ -130,7 +130,7 @@ export function ThreadDetail() {
         ← スレッド一覧へ
       </Link>
       {exists ? (
-        <RunGate runId={params.run}>{(results) => <ThreadBody threadId={id} results={results} />}</RunGate>
+        <RunGate>{(results) => <ThreadBody threadId={id} results={results} />}</RunGate>
       ) : (
         <p data-testid="thread-not-found">{`スレッド ${id} は見つかりません`}</p>
       )}

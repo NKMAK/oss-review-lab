@@ -5,10 +5,16 @@ import FormLabel from "@mui/material/FormLabel";
 import Radio from "@mui/material/Radio";
 import RadioGroup from "@mui/material/RadioGroup";
 import TextField from "@mui/material/TextField";
+import type { LabelVariant } from "../../data/compose";
 import { useLoadedData } from "../../data/DataContext";
 import { ASPECT_FILTER_IDS, STYLE_FILTER_IDS } from "../../params/params";
 import type { RoleFilter, ViewParams } from "../../params/params";
 import { labelName, ROLE_LABELS } from "./labels";
+
+const VARIANT_OPTIONS: readonly [LabelVariant, string][] = [
+  ["parent-only", "親コメントだけ(parent-only)"],
+  ["with-replies", "返信も含む(with-replies)"],
+];
 
 type Props = { params: ViewParams; update: (patch: Partial<ViewParams>) => void };
 
@@ -54,6 +60,8 @@ function CheckGroup(props: {
 /** 絞り込み。観点(複数)が主役で、いちばん上に置く。状態はURLのクエリ(useViewParams)。 */
 export function ThreadFilters({ params, update }: Props) {
   const { manifest } = useLoadedData();
+  // with-replies のrun(完了したもの)があるときだけ、切り替えを出す
+  const hasWithReplies = manifest.runs.some((r) => r.status === "complete" && r.variant === "with-replies");
   return (
     <form className="mb-4 flex flex-col gap-2" aria-label="絞り込み" onSubmit={(e) => e.preventDefault()}>
       <CheckGroup
@@ -94,18 +102,18 @@ export function ThreadFilters({ params, update }: Props) {
             />
           }
         />
-        {manifest.runs.length > 0 && (
+        {hasWithReplies && (
           <TextField
             select
             size="small"
-            label="run"
-            value={params.run ?? ""}
-            onChange={(e) => update({ run: e.target.value })}
+            label="ラベルの判定"
+            value={params.variant}
+            onChange={(e) => update({ variant: e.target.value as LabelVariant })}
             slotProps={{ select: { native: true } }}
           >
-            {manifest.runs.map((r) => (
-              <option key={r.runId} value={r.runId}>
-                {r.runId}({r.status})
+            {VARIANT_OPTIONS.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
               </option>
             ))}
           </TextField>

@@ -89,8 +89,10 @@ describe("aggregateResults", () => {
     expect(aggregateResults(results).questionCount).toBe(2);
   });
 
-  it("応答時間は、全Resultの最小・平均・中央値・最大", () => {
-    const results = [100, 200, 300, 1000].map((latencyMs) => result({ latencyMs }));
+  it("応答時間は、リクエスト単位(cost のある Result = リクエストの先頭)の、最小・平均・中央値・最大", () => {
+    const results = [100, 200, 300, 1000].map((latencyMs, i) =>
+      result({ targetId: `t${i}`, latencyMs, cost: 0.01 }),
+    );
     expect(aggregateResults(results).latency).toEqual({
       count: 4,
       minMs: 100,
@@ -98,6 +100,26 @@ describe("aggregateResults", () => {
       medianMs: 250,
       maxMs: 1000,
     });
+  });
+
+  it("1リクエストで15問を送っても、応答時間は1回だけ数える(同じ値が15個のResultに重複して入っている)", () => {
+    const questions = Array.from({ length: 15 }, (_, i) => `q${i}`);
+    const results = [
+      // リクエストA(15問): 応答時間 800ms が15個のResultに重複。cost は先頭だけ
+      ...questions.map((q, i) => result({ targetId: "1001", questionId: q, latencyMs: 800, cost: i === 0 ? 0.01 : null })),
+      // リクエストB(15問): 1200ms
+      ...questions.map((q, i) => result({ targetId: "1002", questionId: q, latencyMs: 1200, cost: i === 0 ? 0.01 : null })),
+      // リクエストC(1問): 100ms
+      result({ targetId: "1003", questionId: "q0", latencyMs: 100, cost: 0.01 }),
+    ];
+    const agg = aggregateResults(results);
+    expect(agg.resultCount).toBe(31);
+    expect(agg.latency).toEqual({ count: 3, minMs: 100, meanMs: 700, medianMs: 800, maxMs: 1200 });
+    expect(agg.billing.requestCount).toBe(3);
+  });
+
+  it("リクエストの先頭(costあり)が無ければ、応答時間は null", () => {
+    expect(aggregateResults([result({ latencyMs: 500, cost: null })]).latency).toBe(null);
   });
 
   it("費用は cost の合計。usage は同じリクエストの全Resultに重複して入るので、costのあるResult(リクエストの先頭)だけを数える(二重計上しない)", () => {

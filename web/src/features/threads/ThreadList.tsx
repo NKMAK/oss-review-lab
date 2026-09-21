@@ -11,8 +11,8 @@ function ThreadResults({ results }: { results: Result[] }) {
   const { threads } = useLoadedData();
   const [params] = useViewParams();
   const views = useMemo(
-    () => threads.map((t) => buildThreadView(t, results, params.threshold)),
-    [threads, results, params.threshold],
+    () => threads.map((t) => buildThreadView(t, results, params)),
+    [threads, results, params.labelThreshold, params.ackThreshold],
   );
   const shown = filterThreadViews(views, params);
   return (
@@ -39,7 +39,7 @@ export function ThreadList() {
   return (
     <section data-testid="page-threads">
       <ThreadFilters params={params} update={update} />
-      <RunGate runId={params.run}>{(results) => <ThreadResults results={results} />}</RunGate>
+      <RunGate>{(results) => <ThreadResults results={results} />}</RunGate>
     </section>
   );
 }
