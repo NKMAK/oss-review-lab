@@ -1,0 +1,10 @@
+{
+  "id": "compatibility-release",
+  "type": "noul",
+  "target": "root",
+  "instructions": "Does `comment` (a code review comment on the code in `diffHunk`) talk about backward compatibility or release/versioning?",
+  "criteria": {
+    "true": "The comment discusses breaking changes, backward compatibility, deprecation, whether the change can go into a patch or minor release, supported versions, or migration for users.",
+    "false": "The comment does not discuss compatibility, breaking changes, versions, or release timing."
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "tests",
+  "type": "noul",
+  "target": "root",
+  "instructions": "Does `comment` (a code review comment on the code in `diffHunk`) talk about tests?",
+  "criteria": {
+    "true": "The comment is about tests: missing or additional test cases, test structure, assertions, mocks, coverage, or how to verify the change.",
+    "false": "The comment is not about tests. Mentioning that something works or fails without discussing test code or test cases does not count."
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "explains-reason",
+  "type": "noul",
+  "target": "root",
+  "instructions": "Does `comment` explain the reason why something should be changed or is a problem?",
+  "criteria": {
+    "true": "The comment gives a reason or justification (why it matters, what would break, what principle applies), not just an instruction.",
+    "false": "The comment states what to do or what is wrong without any reason, or only asks a question."
+  }
+}

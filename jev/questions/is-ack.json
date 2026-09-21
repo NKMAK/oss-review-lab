@@ -1,0 +1,10 @@
+{
+  "id": "is_ack",
+  "type": "noul",
+  "target": "reply",
+  "instructions": "Does `reply` only agree with, acknowledge, or report completion of the request in `thread`, without adding new information or reasoning?",
+  "criteria": {
+    "true": "The reply only expresses agreement, thanks, or that the requested change was done (e.g. \"Done\", \"Good point, fixed\", \"Makes sense\", a thumbs-up), and adds no new information, reasoning, question, or counter-proposal.",
+    "false": "The reply adds anything new: a reason, a question, a disagreement, a different proposal, extra context, or a new request, even if it also says thanks or agrees."
+  }
+}

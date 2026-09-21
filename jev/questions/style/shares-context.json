@@ -1,0 +1,10 @@
+{
+  "id": "shares-context",
+  "type": "noul",
+  "target": "root",
+  "instructions": "Does `comment` share background, history, or context (for example past decisions, related issues, or how other parts behave)?",
+  "criteria": {
+    "true": "The comment provides background information: history, past discussions, related issues or pull requests, project conventions, or how something works elsewhere.",
+    "false": "The comment gives no background; it only asks, instructs, or proposes a change."
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "docs-comments",
+  "type": "noul",
+  "target": "root",
+  "instructions": "Does `comment` (a code review comment on the code in `diffHunk`) talk about documentation or code comments?",
+  "criteria": {
+    "true": "The comment is about documentation, JSDoc, code comments, README or changelog text, or the wording of messages.",
+    "false": "The comment is not about documentation or comments."
+  }
+}

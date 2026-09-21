@@ -1,0 +1,10 @@
+{
+  "id": "feature-request",
+  "type": "noul",
+  "target": "root",
+  "instructions": "Does `comment` request a new feature or propose extending the change with additional functionality?",
+  "criteria": {
+    "true": "The comment asks for something the pull request does not currently do, or proposes extending its scope (for example \"it would be nice to also support X\").",
+    "false": "The comment is about the code as it is in this pull request and does not request additional functionality."
+  }
+}

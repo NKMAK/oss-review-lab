@@ -1,0 +1,10 @@
+{
+  "id": "deps-build-tooling",
+  "type": "noul",
+  "target": "root",
+  "instructions": "Does `comment` (a code review comment on the code in `diffHunk`) talk about dependencies, build, or tooling?",
+  "criteria": {
+    "true": "The comment is about dependencies, package versions, build configuration, CI, linters, formatters, package.json, or other tooling.",
+    "false": "The comment is not about dependencies, build, CI, or tooling."
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "bug-edge-case",
+  "type": "noul",
+  "target": "root",
+  "instructions": "Does `comment` (a code review comment on the code in `diffHunk`) talk about a bug, incorrect behavior, or an unhandled edge case?",
+  "criteria": {
+    "true": "The comment points out behavior that is wrong or may be wrong, a missed edge case (null, empty, error, concurrency, ordering), or a mismatch with the intended specification.",
+    "false": "The comment does not point out incorrect or unhandled behavior; it is about style, structure, tests, docs, or a new feature."
+  }
+}
