@@ -1,4 +1,6 @@
-/** /threads: スレッド一覧。中身はタスク09が実装する(このファイルの中身だけを書き換える)。 */
+import { ThreadList } from "../features/threads/ThreadList";
+
+/** /threads: スレッド一覧。実装は features/threads/。 */
 export default function ThreadListPage() {
-  return <section data-testid="page-threads" />;
+  return <ThreadList />;
 }

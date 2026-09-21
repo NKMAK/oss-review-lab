@@ -1,4 +1,6 @@
-/** /threads/:id: スレッド詳細。中身はタスク09が実装する(このファイルの中身だけを書き換える)。 */
+import { ThreadDetail } from "../features/threads/ThreadDetail";
+
+/** /threads/:id: スレッド詳細。実装は features/threads/。 */
 export default function ThreadDetailPage() {
-  return <section data-testid="page-thread-detail" />;
+  return <ThreadDetail />;
 }
