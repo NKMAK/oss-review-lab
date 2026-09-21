@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ASPECT_IDS, IS_ACK_ID, STYLE_IDS } from "../../shared/src/index";
+import { ASPECT_IDS, IS_ACK_ID, STYLE_IDS } from "@oss-review-lab/shared";
 import { z } from "zod";
 import { sha256, stableStringify } from "./state";
 

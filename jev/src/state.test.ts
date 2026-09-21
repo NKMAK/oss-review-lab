@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import type { Comment, Thread } from "../../shared/src/index";
+import type { Comment, Thread } from "@oss-review-lab/shared";
 import {
   buildIsAckState,
   buildParentOnlyState,

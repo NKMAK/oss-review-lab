@@ -2,7 +2,7 @@ import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { Result } from "../../shared/src/index";
+import type { Result } from "@oss-review-lab/shared";
 import { cacheKey, canonicalJson, contentHash, ResultCache } from "./cache";
 
 const H1 = "a".repeat(64);

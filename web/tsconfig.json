@@ -5,7 +5,6 @@
     "jsx": "react-jsx",
     "types": ["vite/client"],
     "paths": {
-      "@oss-review-lab/shared": ["../shared/src/index.ts"],
       "react": ["../node_modules/.pnpm/node_modules/@types/react"],
       "react/*": ["../node_modules/.pnpm/node_modules/@types/react/*"]
     }

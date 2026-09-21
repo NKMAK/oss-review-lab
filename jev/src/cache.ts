@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { ResultSchema, type Result } from "../../shared/src/index"; // TODO: shared/package.json に main/exports が無く vitest が解決できないため、暫定で相対パス
+import { ResultSchema, type Result } from "@oss-review-lab/shared";
 import { atomicWriteJson } from "./atomic-write";
 
 /** キーの順序に依存しない、決定的なJSON文字列。 */

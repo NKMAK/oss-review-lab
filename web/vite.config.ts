@@ -1,6 +1,5 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { extname, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
@@ -56,9 +55,5 @@ function dataDirPlugin(dataDir: string): Plugin {
 }
 
 export default defineConfig({
-  resolve: {
-    // shared は package.json に main/exports を持たないので、ソースを直接指す(tsconfig の paths と対応)
-    alias: { "@oss-review-lab/shared": fileURLToPath(new URL("../shared/src/index.ts", import.meta.url)) },
-  },
   plugins: [react(), tailwindcss(), dataDirPlugin(process.env.VITE_DATA_DIR ?? "../data")],
 });

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { ASPECT_IDS, IS_ACK_ID, QUESTION_IDS, STYLE_IDS } from "../../shared/src/index";
+import { ASPECT_IDS, IS_ACK_ID, QUESTION_IDS, STYLE_IDS } from "@oss-review-lab/shared";
 import {
   buildRequests,
   loadQuestionDefs,

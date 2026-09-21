@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { isAckExcluded, isCodeExcludedReply } from "../../shared/src/index";
-import type { Comment, Thread } from "../../shared/src/index";
+import { isAckExcluded, isCodeExcludedReply } from "@oss-review-lab/shared";
+import type { Comment, Thread } from "@oss-review-lab/shared";
 
 /** キー順に依存しない決定的なJSON文字列(hash計算用)。 */
 export function stableStringify(value: unknown): string {

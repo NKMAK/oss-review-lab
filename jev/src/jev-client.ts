@@ -1,6 +1,6 @@
 import { z } from "zod";
 // shared/package.json に main/exports が無く、パッケージ名では型を解決できないため、型のみ相対で参照する(実行時には消える)。
-import type { Result } from "../../shared/src/run";
+import type { Result } from "@oss-review-lab/shared";
 
 export const JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 export const DEFAULT_TIMEOUT_MS = 30_000;
