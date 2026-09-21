@@ -1,0 +1,10 @@
+{
+  "id": "suggests-fix",
+  "type": "noul",
+  "target": "root",
+  "instructions": "Does `comment` propose a concrete fix or alternative code change?",
+  "criteria": {
+    "true": "The comment shows or clearly describes a concrete change to make (for example a `suggestion` block, replacement code, or \"use X instead of Y\").",
+    "false": "The comment only points out a problem, asks a question, or gives background, without a concrete change to make."
+  }
+}

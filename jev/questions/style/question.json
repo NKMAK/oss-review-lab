@@ -1,0 +1,10 @@
+{
+  "id": "question",
+  "type": "noul",
+  "target": "root",
+  "instructions": "Does `comment` ask a question or ask the author to confirm their intent?",
+  "criteria": {
+    "true": "The comment asks something (for example \"why is this needed?\", \"is this intended?\") or asks the author to clarify or confirm.",
+    "false": "The comment only makes statements or gives instructions and does not ask anything."
+  }
+}

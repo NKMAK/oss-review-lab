@@ -1,0 +1,10 @@
+{
+  "id": "types",
+  "type": "noul",
+  "target": "root",
+  "instructions": "Does `comment` (a code review comment on the code in `diffHunk`) talk about TypeScript types?",
+  "criteria": {
+    "true": "The comment is about types: type annotations, generics, type safety, `any`, type inference, overloads, interfaces or type definitions.",
+    "false": "The comment does not concern types. Merely mentioning a variable or a function without discussing its type does not count."
+  }
+}

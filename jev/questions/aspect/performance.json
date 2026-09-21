@@ -1,0 +1,10 @@
+{
+  "id": "performance",
+  "type": "noul",
+  "target": "root",
+  "instructions": "Does `comment` (a code review comment on the code in `diffHunk`) talk about performance?",
+  "criteria": {
+    "true": "The comment is about performance: speed, memory usage, unnecessary allocations or iterations, caching, or bundle size.",
+    "false": "The comment is not about performance."
+  }
+}
