@@ -2,7 +2,13 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+    "paths": {
+      "@oss-review-lab/shared": ["../shared/src/index.ts"],
+      "react": ["../node_modules/.pnpm/node_modules/@types/react"],
+      "react/*": ["../node_modules/.pnpm/node_modules/@types/react/*"]
+    }
   },
-  "include": ["src", "vitest.config.ts"]
+  "include": ["src", "vitest.config.ts", "vite.config.ts"]
 }
