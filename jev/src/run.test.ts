@@ -512,6 +512,29 @@ describe("出力実績が無い最初の実行は、1リクエスト・1質問�
     seedThreads(3);
     await expect(planDryRun(opts({ mode: "dry-run", apiKey: null, seedHistory: false, maxCostPerRequest: 0.5 }))).resolves.toBeDefined();
   });
+
+  it("同じvariantで、別の質問(1問)の実績が1件あれば、質問セット(複数問)をまとめた初回実行も、制約が外れる(--max-cost-per-requestは必要)", async () => {
+    // 実データでの試走で見つかった不具合の再現: 質問セット(15問)の完全一致だけで実績を数えると、
+    // そのセットで送る限り、実績を作る手段が無く、永久に初回実行の制約(1問だけ)から抜け出せない。
+    // 出力は無料なので、質問数が増えても出力コストは増えない。別の質問の実績が1件でもあれば、十分。
+    seedThreads(3);
+    const first = mockFetch();
+    await runJev(opts({ fetch: first.fetch, seedHistory: false, maxCostPerRequest: 0.5, mode: "limit", limit: 1, questionIds: ["design-api"] }));
+
+    const defs = loadQuestionDefs();
+    const fullPlan = [...defs.aspects, ...defs.styles]; // questionIds を指定しない、既定の質問セット(15問)
+    const second = mockFetch();
+    const out = await runJev(
+      opts({ fetch: second.fetch, seedHistory: false, maxCostPerRequest: 0.5, mode: "limit", limit: 1 }),
+    );
+    expect(second.calls.length).toBe(1);
+    // 1件目のrunで、同じ対象(1件目のスレッド)の design-api は、既に判定済み(キャッシュ済み)なので、
+    // 2件目のリクエストには、残り14問だけが含まれる。
+    expect(Object.keys(second.calls[0]!.body.questions).sort()).toEqual(
+      fullPlan.map((d) => d.id).filter((id) => id !== "design-api").sort(),
+    );
+    expect(out.kind === "run" && out.sentRequests).toBe(1);
+  });
 });
 
 describe("overrun の停止は、再起動後も維持され、明示的な解除で外れる", () => {

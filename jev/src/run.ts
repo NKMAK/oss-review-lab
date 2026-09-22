@@ -273,9 +273,31 @@ function completedRequestsOf(dataDir: string, p: Prepared): number {
   return count;
 }
 
-/** 出力実績が無い質問計画は、推定予約額を上限と誤認しないよう、試走を1件・1問に絞る。 */
-function assertFirstExecutionGuard(o: RunJevOptions, p: Prepared, completedRequests: number): void {
-  if (completedRequests > 0) return;
+/**
+ * この variant で、同じ質問計画とは限らず、完了した実績が1件でもあるか。
+ * 「初回1問縛り」を外すための判定で、completedRequestsOf(質問計画ごとの厳格な一致)とは別にする。
+ *
+ * 質問セット(質問計画)が違うたびに、そのセットの実績が0件になるので、質問計画の完全一致だけで判定すると、
+ * 複数の質問をまとめた計画(例: 15問セット)を、永久に初回実行できなくなる(そのセットで送る限り、
+ * 実績を作る手段が無い)。出力トークンは無料([discussion/jev-budget-staged-run.md]と、2026-09-22に
+ * 公式ドキュメント https://docs.typesafe.ai/models.md で確認)なので、質問数が増えても出力コストは
+ * 増えない。そのため、同じvariantで、どんな質問セットでもよいので、一度でも実際の応答を確認できていれば、
+ * 「初回1問縛り」は外してよい(入力費用は、リクエストの大きさから、毎回、独立に見積もる)。
+ */
+function anyCompletedRequestsOf(dataDir: string, p: Prepared): number {
+  let count = 0;
+  for (const entry of p.manifest.runs) {
+    if (!existsSync(join(dataDir, entry.file))) continue;
+    const run = readRunFile(dataDir, entry);
+    if (run.variant !== p.variant) continue;
+    count += run.results.filter((result) => result.error === null && result.usage !== null).length;
+  }
+  return count;
+}
+
+/** 出力実績が無い(このvariantで、まだ1件も成功していない)ときは、推定予約額を上限と誤認しないよう、試走を1件・1問に絞る。 */
+function assertFirstExecutionGuard(o: RunJevOptions, p: Prepared, anyCompletedRequests: number): void {
+  if (anyCompletedRequests > 0) return;
   if (o.mode === "all") throw new Error("出力実績が無い最初の実行では --all は使えません。--limit 1 --questions <id> で試走してください");
   if (o.mode !== "limit" || o.limit !== 1) {
     throw new Error("出力実績が無い最初の実行は --limit 1 にしてください(1リクエストだけ送信します)");
@@ -356,6 +378,8 @@ async function lookup(
 export async function planDryRun(o: RunJevOptions): Promise<DryRunPlan> {
   validateOptions(o);
   const p = prepare(o);
+  // dry-runは、何も送信しない(課金が発生しない)ので、実行時の「初回1問縛り」は確認しない。
+  // 見積もりの数字が、実際に送るときには拒否される場合があることは、note で示す(下)。
   const cache = new ResultCache(join(o.dataDir, "cache"));
   const model = knownModelOf(o.dataDir, p);
   const pricing = await loadPricing(o.pricingPath);
@@ -429,7 +453,7 @@ export async function runJev(o: RunJevOptions): Promise<RunOutcome> {
   const log = (line: string): void => o.log?.(redactSecrets(line, apiKey));
   const p = prepare(o);
   const initialCompletedRequests = completedRequestsOf(o.dataDir, p);
-  assertFirstExecutionGuard(o, p, initialCompletedRequests);
+  assertFirstExecutionGuard(o, p, anyCompletedRequestsOf(o.dataDir, p));
   const requestedModel = o.model ?? DEFAULT_MODEL;
 
   const abort = new AbortController();
