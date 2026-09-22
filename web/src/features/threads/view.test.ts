@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Result, Thread } from "@oss-review-lab/shared";
 import { DEFAULT_VIEW_PARAMS } from "../../params/params";
 import type { ViewParams } from "../../params/params";
-import { buildThreadView, filterThreadViews } from "./view";
+import { buildThreadView, filterThreadViews, sortThreadViewsByProbability } from "./view";
 
 const HASH = "0".repeat(64);
 
@@ -173,5 +173,29 @@ describe("filterThreadViews", () => {
 
   it("該当ゼロなら空", () => {
     expect(ids({ aspects: ["docs-comments"] })).toEqual([]);
+  });
+});
+
+describe("sortThreadViewsByProbability", () => {
+  it("指定した質問の確率が高い順に並べる。無い(未判定・確率なし)ものは最後、元の順を保つ", () => {
+    const views = [
+      buildThreadView(thread("low"), [result("low", "explains-reason", 0.2)], T),
+      buildThreadView(thread("none-a"), [], T),
+      buildThreadView(thread("high"), [result("high", "explains-reason", 0.9)], T),
+      buildThreadView(thread("none-b"), [], T),
+      buildThreadView(thread("mid"), [result("mid", "explains-reason", 0.5)], T),
+    ];
+    const sorted = sortThreadViewsByProbability(views, "explains-reason");
+    expect(sorted.map((v) => v.thread.threadId)).toEqual(["high", "mid", "low", "none-a", "none-b"]);
+    // 元の配列は変更しない
+    expect(views.map((v) => v.thread.threadId)).toEqual(["low", "none-a", "high", "none-b", "mid"]);
+  });
+
+  it("同じ確率は、元の順を保つ(安定ソート)", () => {
+    const views = [
+      buildThreadView(thread("a"), [result("a", "explains-reason", 0.5)], T),
+      buildThreadView(thread("b"), [result("b", "explains-reason", 0.5)], T),
+    ];
+    expect(sortThreadViewsByProbability(views, "explains-reason").map((v) => v.thread.threadId)).toEqual(["a", "b"]);
   });
 });

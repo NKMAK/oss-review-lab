@@ -53,13 +53,14 @@ describe("parseViewParams", () => {
       showExcluded: false,
       variant: "parent-only",
       run: null,
+      sort: "created",
     });
   });
 
   it("正しいクエリを全て解釈する", () => {
     expect(
       parse(
-        "ackThreshold=0.9&labelThreshold=0.7&band=0.2&aspects=types,tests,other&styles=question&role=reviewer&excluded=1&variant=with-replies&run=run-b",
+        "ackThreshold=0.9&labelThreshold=0.7&band=0.2&aspects=types,tests,other&styles=question&role=reviewer&excluded=1&variant=with-replies&run=run-b&sort=explains-reason",
       ),
     ).toEqual({
       ackThreshold: 0.9,
@@ -71,7 +72,13 @@ describe("parseViewParams", () => {
       showExcluded: true,
       variant: "with-replies",
       run: "run-b",
+      sort: "explains-reason",
     });
+  });
+
+  it("不明なsortは、既定(created)に戻す", () => {
+    expect(parse("sort=unknown").sort).toBe("created");
+    expect(parse("").sort).toBe("created");
   });
 
   it.each(["NaN", "1.5", "-1", "", "abc"])("閾値が %j なら、それぞれの既定値に戻す", (v) => {
@@ -146,9 +153,10 @@ describe("toSearchParams", () => {
       showExcluded: true,
       variant: "with-replies" as const,
       run: "run-b",
+      sort: "explains-reason" as const,
     };
     expect(toSearchParams(p).toString()).toBe(
-      "ackThreshold=0.9&labelThreshold=0.7&band=0.2&aspects=types%2Ctests&styles=question&role=pr-author&excluded=1&variant=with-replies&run=run-b",
+      "ackThreshold=0.9&labelThreshold=0.7&band=0.2&aspects=types%2Ctests&styles=question&role=pr-author&excluded=1&variant=with-replies&run=run-b&sort=explains-reason",
     );
     expect(parse(toSearchParams(p).toString())).toEqual(p);
   });

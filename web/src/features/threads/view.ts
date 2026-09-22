@@ -53,6 +53,18 @@ export function buildThreadView(thread: Thread, results: readonly Result[], thre
   };
 }
 
+/** 質問IDを1つ指定して、その確率が高い順に並べる(未判定・確率なしは最後、元の順を保つ)。 */
+export function sortThreadViewsByProbability(views: readonly ThreadView[], questionId: string): ThreadView[] {
+  return [...views].sort((a, b) => {
+    const pa = a.probabilities[questionId];
+    const pb = b.probabilities[questionId];
+    if (pa === undefined && pb === undefined) return 0;
+    if (pa === undefined) return 1;
+    if (pb === undefined) return -1;
+    return pb - pa;
+  });
+}
+
 /**
  * 絞り込み。観点・言い方は、選んだもののいずれかを含む(OR)。観点と言い方と発言者役割は AND。
  * 発言者役割は親コメントの発言者で判定し、不明(null)は「全員」以外に入れない。

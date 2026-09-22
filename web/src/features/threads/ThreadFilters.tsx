@@ -7,14 +7,19 @@ import RadioGroup from "@mui/material/RadioGroup";
 import TextField from "@mui/material/TextField";
 import type { LabelVariant } from "../../data/compose";
 import { useLoadedData } from "../../data/DataContext";
-import { ASPECT_FILTER_IDS, STYLE_FILTER_IDS } from "../../params/params";
-import type { RoleFilter, ViewParams } from "../../params/params";
+import { ASPECT_FILTER_IDS, SORT_ORDERS, STYLE_FILTER_IDS } from "../../params/params";
+import type { RoleFilter, SortOrder, ViewParams } from "../../params/params";
 import { labelName, ROLE_LABELS } from "./labels";
 
 const VARIANT_OPTIONS: readonly [LabelVariant, string][] = [
   ["parent-only", "親コメントだけ(parent-only)"],
   ["with-replies", "返信も含む(with-replies)"],
 ];
+
+const SORT_LABELS: Record<SortOrder, string> = {
+  created: "時系列(古い順)",
+  "explains-reason": "理由の説明がある順",
+};
 
 type Props = { params: ViewParams; update: (patch: Partial<ViewParams>) => void };
 
@@ -92,6 +97,20 @@ export function ThreadFilters({ params, update }: Props) {
         </RadioGroup>
       </div>
       <div className="flex flex-wrap items-center gap-4">
+        <TextField
+          select
+          size="small"
+          label="並び順"
+          value={params.sort}
+          onChange={(e) => update({ sort: e.target.value as SortOrder })}
+          slotProps={{ select: { native: true } }}
+        >
+          {SORT_ORDERS.map((value) => (
+            <option key={value} value={value}>
+              {SORT_LABELS[value]}
+            </option>
+          ))}
+        </TextField>
         <FormControlLabel
           label="除外を含む"
           control={

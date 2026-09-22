@@ -72,7 +72,7 @@ describe("useViewParams", () => {
     stubFetch();
     renderAt("/threads");
     expect((await screen.findByTestId("params")).textContent).toBe(
-      '{"ackThreshold":0.8,"labelThreshold":0.5,"band":0.1,"aspects":[],"styles":[],"role":"all","showExcluded":false,"variant":"parent-only","run":null}',
+      '{"ackThreshold":0.8,"labelThreshold":0.5,"band":0.1,"aspects":[],"styles":[],"role":"all","showExcluded":false,"variant":"parent-only","run":null,"sort":"created"}',
     );
   });
 

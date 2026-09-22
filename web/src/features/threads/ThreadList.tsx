@@ -5,7 +5,10 @@ import { useViewParams } from "../../params/useViewParams";
 import { RunGate } from "./RunGate";
 import { ThreadCard } from "./ThreadCard";
 import { ThreadFilters } from "./ThreadFilters";
-import { buildThreadView, filterThreadViews } from "./view";
+import { buildThreadView, filterThreadViews, sortThreadViewsByProbability } from "./view";
+
+/** 並び替え「explains-reason」で使う質問ID。 */
+const REASON_QUESTION_ID = "explains-reason";
 
 function ThreadResults({ results }: { results: Result[] }) {
   const { threads } = useLoadedData();
@@ -14,7 +17,9 @@ function ThreadResults({ results }: { results: Result[] }) {
     () => threads.map((t) => buildThreadView(t, results, params)),
     [threads, results, params.labelThreshold, params.ackThreshold],
   );
-  const shown = filterThreadViews(views, params);
+  const filtered = filterThreadViews(views, params);
+  const shown =
+    params.sort === "explains-reason" ? sortThreadViewsByProbability(filtered, REASON_QUESTION_ID) : filtered;
   return (
     <>
       <p data-testid="thread-count" role="status">

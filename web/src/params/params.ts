@@ -17,6 +17,14 @@ export const DEFAULT_BAND = 0.1;
 export const ROLE_FILTERS = ["all", "pr-author", "reviewer"] as const;
 export type RoleFilter = (typeof ROLE_FILTERS)[number];
 
+/**
+ * 一覧の並び順。既定(created)は、スレッド(親コメント)の時系列。explains-reasonは、
+ * 「理由を説明している」確率が高い順(学びの大きいものを、埋もれさせないため)。
+ */
+export const SORT_ORDERS = ["created", "explains-reason"] as const;
+export type SortOrder = (typeof SORT_ORDERS)[number];
+export const DEFAULT_SORT: SortOrder = "created";
+
 /** 観点の絞り込みで選べる値(「その他」を含む)。 */
 export const ASPECT_FILTER_IDS: readonly string[] = [...ASPECT_IDS, OTHER_LABEL];
 export const STYLE_FILTER_IDS: readonly string[] = [...STYLE_IDS, OTHER_LABEL];
@@ -36,6 +44,8 @@ export type ViewParams = {
   variant: LabelVariant;
   /** `/jev` で選んだrun。指定が無い(または不明な)ときは null(`/jev` は、既定のrunを使う) */
   run: string | null;
+  /** 一覧の並び順(URLのクエリ `sort`) */
+  sort: SortOrder;
 };
 
 export const DEFAULT_VIEW_PARAMS: ViewParams = {
@@ -48,6 +58,7 @@ export const DEFAULT_VIEW_PARAMS: ViewParams = {
   showExcluded: false,
   variant: DEFAULT_LABEL_VARIANT,
   run: null,
+  sort: DEFAULT_SORT,
 };
 
 /** 10進の小数だけを許可し(空文字・空白・指数・16進・NaN・Infinityは不可)、0〜1に収まるものだけ返す。 */
@@ -88,6 +99,7 @@ export function parseViewParams(search: URLSearchParams, ctx: ParseContext): Vie
   const runRaw = single(search, "run");
   const roleRaw = single(search, "role");
   const variantRaw = single(search, "variant");
+  const sortRaw = single(search, "sort");
   return {
     // URL > localStorage > 既定値(2つの閾値は、互いに独立)
     ackThreshold: parseProbability(single(search, "ackThreshold")) ?? ctx.storedAckThreshold ?? DEFAULT_ACK_THRESHOLD,
@@ -100,6 +112,7 @@ export function parseViewParams(search: URLSearchParams, ctx: ParseContext): Vie
     showExcluded: single(search, "excluded") === "1",
     variant: LABEL_VARIANTS.find((v) => v === variantRaw) ?? DEFAULT_LABEL_VARIANT,
     run: runRaw !== null && ctx.knownRunIds.includes(runRaw) ? runRaw : null,
+    sort: SORT_ORDERS.find((s) => s === sortRaw) ?? DEFAULT_SORT,
   };
 }
 
@@ -115,6 +128,7 @@ export function toSearchParams(p: ViewParams): URLSearchParams {
   if (p.showExcluded) s.set("excluded", "1");
   if (p.variant !== DEFAULT_LABEL_VARIANT) s.set("variant", p.variant);
   if (p.run !== null) s.set("run", p.run);
+  if (p.sort !== DEFAULT_SORT) s.set("sort", p.sort);
   return s;
 }
 
