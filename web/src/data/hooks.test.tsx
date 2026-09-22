@@ -72,7 +72,7 @@ describe("useViewParams", () => {
     stubFetch();
     renderAt("/threads");
     expect((await screen.findByTestId("params")).textContent).toBe(
-      '{"ackThreshold":0.8,"labelThreshold":0.5,"band":0.1,"aspects":[],"styles":[],"role":"all","showExcluded":false,"variant":"parent-only","run":null,"sort":"created"}',
+      '{"ackThreshold":0.8,"labelThreshold":0.5,"band":0.1,"aspects":[],"styles":[],"role":"all","showExcluded":false,"variant":"parent-only","run":null,"sort":"created","selfContainedOnly":false}',
     );
   });
 
@@ -113,9 +113,9 @@ describe("useResults", () => {
   it("completeの全runを読み、合成した結果を返す(partialのrunは読み込まない)", async () => {
     const calls = stubFetch();
     renderAt("/threads");
-    // ack 8 + aspects 30 + with-replies 15(partial の3件は含めない)
+    // ack 8 + aspects 32(self-contained追加で+2) + with-replies 15(partial の3件は含めない)
     expect((await screen.findByText(/^success:/)).textContent).toBe(
-      "success:run-20260921-ack,run-20260921-aspects,run-20260921-with-replies:53:0",
+      "success:run-20260921-ack,run-20260921-aspects,run-20260921-with-replies:55:0",
     );
     // (このテストの Probe が useRun でも ack を読むので、重複は除く)
     expect([...new Set(calls.filter((u) => u.startsWith("/data/runs/")))].sort()).toEqual([
@@ -162,7 +162,7 @@ describe("useResults", () => {
     stubFetch({ "/data/runs/run-20260921-ack.json": FIXTURE_FILES["/data/runs/run-20260921-ack.json"]!.replace("jev-0.0.0-dummy", "other") });
     renderAt("/threads");
     expect((await screen.findByText(/^success:/)).textContent).toBe(
-      "success:run-20260921-ack,run-20260921-aspects,run-20260921-with-replies:53:1",
+      "success:run-20260921-ack,run-20260921-aspects,run-20260921-with-replies:55:1",
     );
   });
 });

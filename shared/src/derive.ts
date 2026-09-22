@@ -21,6 +21,20 @@ export function isReviewBand(prob: number, threshold: number, width: number): bo
   return Math.abs(prob - threshold) <= width + EPSILON;
 }
 
+/**
+ * self-contained(理解のしやすさ)の質問は、確率の向きが逆(jev/questions/understandability/self-contained.json:
+ * true = このOSSの内部知識が要る)。Web側で使う「知識が無くてもわかる確率」は、常にこの関数で反転して作る
+ * (質問定義そのものは反転しない。UI・絞り込みの意味づけだけをここに閉じ込める)。
+ */
+export function selfContainedProbability(needsKnowledgeProbability: number): number {
+  return 1 - needsKnowledgeProbability;
+}
+
+/** 「知識が無くてもわかる確率」(反転後)が閾値以上か(境界を含む)。 */
+export function isSelfContained(needsKnowledgeProbability: number, threshold: number): boolean {
+  return selfContainedProbability(needsKnowledgeProbability) >= threshold - EPSILON;
+}
+
 export type DerivedLabels = {
   aspects: (AspectId | OtherLabel)[];
   styles: (StyleId | OtherLabel)[];

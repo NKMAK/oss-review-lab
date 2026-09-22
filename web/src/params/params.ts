@@ -46,6 +46,11 @@ export type ViewParams = {
   run: string | null;
   /** 一覧の並び順(URLのクエリ `sort`) */
   sort: SortOrder;
+  /**
+   * 「OSSの知識が無くてもわかるものだけ」の絞り込み(URLのクエリ `selfContainedOnly`)。
+   * self-contained の確率は向きが逆(shared の selfContainedProbability で反転してから labelThreshold と比べる)。
+   */
+  selfContainedOnly: boolean;
 };
 
 export const DEFAULT_VIEW_PARAMS: ViewParams = {
@@ -59,6 +64,7 @@ export const DEFAULT_VIEW_PARAMS: ViewParams = {
   variant: DEFAULT_LABEL_VARIANT,
   run: null,
   sort: DEFAULT_SORT,
+  selfContainedOnly: false,
 };
 
 /** 10進の小数だけを許可し(空文字・空白・指数・16進・NaN・Infinityは不可)、0〜1に収まるものだけ返す。 */
@@ -113,6 +119,7 @@ export function parseViewParams(search: URLSearchParams, ctx: ParseContext): Vie
     variant: LABEL_VARIANTS.find((v) => v === variantRaw) ?? DEFAULT_LABEL_VARIANT,
     run: runRaw !== null && ctx.knownRunIds.includes(runRaw) ? runRaw : null,
     sort: SORT_ORDERS.find((s) => s === sortRaw) ?? DEFAULT_SORT,
+    selfContainedOnly: single(search, "selfContainedOnly") === "1",
   };
 }
 
@@ -129,6 +136,7 @@ export function toSearchParams(p: ViewParams): URLSearchParams {
   if (p.variant !== DEFAULT_LABEL_VARIANT) s.set("variant", p.variant);
   if (p.run !== null) s.set("run", p.run);
   if (p.sort !== DEFAULT_SORT) s.set("sort", p.sort);
+  if (p.selfContainedOnly) s.set("selfContainedOnly", "1");
   return s;
 }
 

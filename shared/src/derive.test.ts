@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { deriveLabels, isAckExcluded, isCodeExcludedReply, isReviewBand } from "./derive";
+import {
+  deriveLabels,
+  isAckExcluded,
+  isCodeExcludedReply,
+  isReviewBand,
+  isSelfContained,
+  selfContainedProbability,
+} from "./derive";
 import type { Comment } from "./thread";
 import type { Result } from "./run";
 
@@ -108,5 +115,26 @@ describe("deriveLabels", () => {
       aspects: ["other"],
       styles: ["other"],
     });
+  });
+});
+
+describe("selfContainedProbability", () => {
+  it("self-containedの質問は「知識が要る確率」を返す向きなので、1から引いて「知識が無くてもわかる確率」にする", () => {
+    expect(selfContainedProbability(0.9)).toBeCloseTo(0.1, 10);
+    expect(selfContainedProbability(0.2)).toBeCloseTo(0.8, 10);
+    expect(selfContainedProbability(0)).toBe(1);
+    expect(selfContainedProbability(1)).toBe(0);
+  });
+});
+
+describe("isSelfContained", () => {
+  it("反転した確率(知識が無くてもわかる確率)が閾値以上なら true", () => {
+    // 生の確率(知識が要る確率)0.1 → 反転後 0.9 → 閾値0.5以上
+    expect(isSelfContained(0.1, 0.5)).toBe(true);
+    // 生の確率0.9 → 反転後0.1 → 閾値0.5未満
+    expect(isSelfContained(0.9, 0.5)).toBe(false);
+  });
+  it("閾値ちょうどは含める", () => {
+    expect(isSelfContained(0.5, 0.5)).toBe(true);
   });
 });

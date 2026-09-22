@@ -140,6 +140,18 @@ describe("/threads(スレッド一覧)", () => {
     expect(cardIds()).toEqual([]);
   });
 
+  it("「OSSの知識が無くてもわかるものだけ」を選ぶと、self-containedの反転確率がlabelThreshold以上のものだけ残る", async () => {
+    stubFetch();
+    const router = await renderAt("/threads");
+    // 既定(オフ)では両方出る(1001: 生0.3→反転0.7、4001: 生0.8→反転0.2)
+    expect(cardIds()).toEqual(["1001", "4001"]);
+    await userEvent.click(screen.getByRole("checkbox", { name: "OSSの知識が無くてもわかるものだけ" }));
+    expect(cardIds()).toEqual(["1001"]);
+    expect(router.state.location.search).toBe(
+      "?ackThreshold=0.8&labelThreshold=0.5&selfContainedOnly=1",
+    );
+  });
+
   it("除外スレッドは既定で隠れ、切り替えると除外理由付きで見える", async () => {
     stubFetch();
     await renderAt("/threads");

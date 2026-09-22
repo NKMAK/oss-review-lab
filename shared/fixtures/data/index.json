@@ -26,7 +26,7 @@
       "runId": "run-20260921-aspects",
       "status": "complete",
       "file": "runs/run-20260921-aspects.json",
-      "sha256": "7c396bededcae5d7bb27d3c5101fc7494d444c2e16fd1f74b4ab4284834ec30b",
+      "sha256": "5d7311f4f9d8667ca48c9b71faebdc365cc360fb0c32ce11a771f973f63a839b",
       "createdAt": "2026-09-21T01:00:00Z",
       "variant": "parent-only"
     },

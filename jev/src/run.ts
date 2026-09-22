@@ -187,7 +187,7 @@ function selectQuestions(o: RunJevOptions, all: ReturnType<typeof loadQuestionDe
     }
     return { defs: [all.isAck], ackMode: true };
   }
-  const base = [...all.aspects, ...all.styles];
+  const base = [...all.aspects, ...all.styles, ...all.understandability];
   const defs = ids === undefined ? base : base.filter((d) => ids.includes(d.id));
   if (defs.length === 0) throw new Error("質問が1つもありません");
   return { defs, ackMode: false };

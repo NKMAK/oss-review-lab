@@ -1,0 +1,10 @@
+{
+  "id": "self-contained",
+  "type": "noul",
+  "target": "root",
+  "instructions": "Does understanding `comment` (a code review comment on the code in `diffHunk`) require knowledge specific to this project (its internal architecture, past design decisions, internal APIs/classes, or team conventions), beyond general programming and language knowledge?",
+  "criteria": {
+    "true": "The comment can be understood with general programming/TypeScript knowledge alone: it does not depend on knowing this project's internal structure, history, or conventions.",
+    "false": "Understanding the comment requires knowing something specific to this project: an internal class/module/decision, a past discussion, an internal convention, or how an internal API is used elsewhere in this codebase."
+  }
+}

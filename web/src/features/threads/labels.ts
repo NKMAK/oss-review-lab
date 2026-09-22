@@ -19,6 +19,9 @@ export const LABEL_NAMES: Record<string, string> = {
   "shares-context": "文脈の共有",
   "feature-request": "機能要望",
   is_ack: "同意・完了報告",
+  // 生の確率は向きが逆(高い=内部知識が要る)。一覧の絞り込み(OSSの知識が無くてもわかるものだけ)は
+  // 反転した値(selfContainedProbability)を使うが、この詳細画面の生の値の一覧では反転しない
+  "self-contained": "自己完結(生:知識が要る確率)",
   other: "その他",
 };
 

@@ -92,6 +92,7 @@ describe("/threads/:id(スレッド詳細)", () => {
         "質問 確率 10%",
         "文脈の共有 確率 5%",
         "機能要望 確率 15%",
+        "自己完結(生:知識が要る確率) 確率 30%",
       ],
     });
     // 返信のJevの結果は、別のrun(ack)から合成される。既定の除外の閾値 0.8: 1002(0.97)が除外。
@@ -107,8 +108,8 @@ describe("/threads/:id(スレッド詳細)", () => {
   it("返信のJevの結果は、is_ackの確率として出る。閾値以上なら除外の印が付く", async () => {
     stubFetch();
     await renderAt("/threads/1001?ackThreshold=0.97");
-    expect(readTimeline().map((c) => [c.id, c.badge, c.results.length === 15 ? "15件" : c.results])).toEqual([
-      ["1001", null, "15件"],
+    expect(readTimeline().map((c) => [c.id, c.badge, c.results.length === 16 ? "16件" : c.results])).toEqual([
+      ["1001", null, "16件"],
       ["1002", "除外: 同意・完了報告", ["同意・完了報告 確率 97%"]],
       ["1003", "除外: bot", ["同意・完了報告 確率 30%"]],
       ["1004", "除外: 削除済みユーザー", []],

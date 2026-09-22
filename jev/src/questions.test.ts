@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { ASPECT_IDS, IS_ACK_ID, QUESTION_IDS, STYLE_IDS } from "@oss-review-lab/shared";
+import { ASPECT_IDS, IS_ACK_ID, QUESTION_IDS, STYLE_IDS, UNDERSTANDABILITY_IDS } from "@oss-review-lab/shared";
 import {
   buildRequests,
   loadQuestionDefs,
@@ -26,17 +26,21 @@ describe("loadQuestionDefs(実際の定義ファイル)", () => {
     expect(defs.all.map((d) => d.id).sort()).toEqual([...QUESTION_IDS].sort());
     expect(defs.aspects.map((d) => d.id)).toEqual([...ASPECT_IDS]);
     expect(defs.styles.map((d) => d.id)).toEqual([...STYLE_IDS]);
+    expect(defs.understandability.map((d) => d.id)).toEqual([...UNDERSTANDABILITY_IDS]);
     expect(defs.isAck.id).toBe(IS_ACK_ID);
   });
 
-  it("is_ackは返信が対象、観点・言い方は親が対象で、全てnoul", () => {
+  it("is_ackは返信が対象、観点・言い方・理解のしやすさは親が対象で、全てnoul", () => {
     expect(defs.isAck.target).toBe("reply");
     expect(defs.aspects.map((d) => [d.target, d.type])).toEqual(ASPECT_IDS.map(() => ["root", "noul"]));
     expect(defs.styles.map((d) => [d.target, d.type])).toEqual(STYLE_IDS.map(() => ["root", "noul"]));
+    expect(defs.understandability.map((d) => [d.target, d.type])).toEqual(
+      UNDERSTANDABILITY_IDS.map(() => ["root", "noul"]),
+    );
   });
 
   it("全ての定義に、空でないinstructionsとtrue/falseのcriteriaがある", () => {
-    for (const d of [defs.isAck, ...defs.aspects, ...defs.styles]) {
+    for (const d of [defs.isAck, ...defs.aspects, ...defs.styles, ...defs.understandability]) {
       expect(d.instructions.length > 0 && d.criteria.true.length > 0 && d.criteria.false.length > 0).toBe(true);
     }
   });
@@ -124,14 +128,16 @@ describe("buildRequests", () => {
     ]);
   });
 
-  it("実際の15問: まとめると1リクエストに15のID、分けると15リクエスト", () => {
+  it("実際の16問: まとめると1リクエストに16のID、分けると16リクエスト", () => {
     const d = loadQuestionDefs();
-    const rootDefs = [...d.aspects, ...d.styles];
+    const rootDefs = [...d.aspects, ...d.styles, ...d.understandability];
     const whole = buildRequests(state, rootDefs, false);
     expect(whole.length).toBe(1);
-    expect(whole[0]?.questionIds).toEqual([...ASPECT_IDS, ...STYLE_IDS]);
-    expect(Object.keys(whole[0]?.questions ?? {})).toEqual([...ASPECT_IDS, ...STYLE_IDS]);
+    expect(whole[0]?.questionIds).toEqual([...ASPECT_IDS, ...STYLE_IDS, ...UNDERSTANDABILITY_IDS]);
+    expect(Object.keys(whole[0]?.questions ?? {})).toEqual([...ASPECT_IDS, ...STYLE_IDS, ...UNDERSTANDABILITY_IDS]);
     const split = buildRequests(state, rootDefs, true);
-    expect(split.map((r) => r.questionIds)).toEqual([...ASPECT_IDS, ...STYLE_IDS].map((id) => [id]));
+    expect(split.map((r) => r.questionIds)).toEqual(
+      [...ASPECT_IDS, ...STYLE_IDS, ...UNDERSTANDABILITY_IDS].map((id) => [id]),
+    );
   });
 });
