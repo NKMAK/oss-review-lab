@@ -1,0 +1,10 @@
+{
+  "id": "readability-naming",
+  "type": "noul",
+  "target": "root",
+  "instructions": "Does `comment` (a code review comment on the code in `diffHunk`) talk about readability, naming, or code consistency?",
+  "criteria": {
+    "true": "The comment is about readability, naming of variables or functions, code style, consistency with conventions or with nearby code, simplification, or removing duplication.",
+    "false": "The comment is about behavior, design of the public API, types, tests, or documentation, and not about how the code reads or how consistent it is."
+  }
+}

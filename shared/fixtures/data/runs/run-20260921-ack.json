@@ -1,0 +1,188 @@
+{
+  "schemaVersion": 1,
+  "runId": "run-20260921-ack",
+  "model": "jev-0.0.0-dummy",
+  "variant": "reply",
+  "stateConfig": {},
+  "threadsSha256": "e6bde7eedd6e6b38df68eebb9145d559ec47305ce6e8b4b3c5d570ba7d5ab5e3",
+  "questionPlanHash": "6e9b7157d2d044f371176f962715fff7c041565095065cc30f565fade01ca9b6",
+  "questionDefs": [
+    {
+      "id": "is_ack",
+      "hash": "277c1b9cb5de890b102485a0b5154735190967a7e016d0c31e9fe3a8c62a1ed8"
+    }
+  ],
+  "createdAt": "2026-09-21T00:00:00Z",
+  "finishedAt": "2026-09-21T00:05:00Z",
+  "status": "complete",
+  "results": [
+    {
+      "targetId": "1002",
+      "questionId": "is_ack",
+      "questionType": "noul",
+      "questionDefHash": "277c1b9cb5de890b102485a0b5154735190967a7e016d0c31e9fe3a8c62a1ed8",
+      "stateHash": "e95802be7a04680375f42623db355cbf5b4350b1860b07109fa589160553dfa1",
+      "variant": "reply",
+      "raw": {
+        "type": "noul",
+        "noul": 0.97
+      },
+      "probability": 0.97,
+      "confidence": null,
+      "latencyMs": 800,
+      "usage": {
+        "inputTokens": 300,
+        "outputTokens": 5
+      },
+      "cost": 0.0001,
+      "error": null
+    },
+    {
+      "targetId": "1005",
+      "questionId": "is_ack",
+      "questionType": "noul",
+      "questionDefHash": "277c1b9cb5de890b102485a0b5154735190967a7e016d0c31e9fe3a8c62a1ed8",
+      "stateHash": "0b0a26c4219b3f85a7c29cf64cb6a424f077a94fc03147b5ef42df7832be4018",
+      "variant": "reply",
+      "raw": {
+        "type": "noul",
+        "noul": 0.1
+      },
+      "probability": 0.1,
+      "confidence": null,
+      "latencyMs": 800,
+      "usage": {
+        "inputTokens": 300,
+        "outputTokens": 5
+      },
+      "cost": 0.0001,
+      "error": null
+    },
+    {
+      "targetId": "4002",
+      "questionId": "is_ack",
+      "questionType": "noul",
+      "questionDefHash": "277c1b9cb5de890b102485a0b5154735190967a7e016d0c31e9fe3a8c62a1ed8",
+      "stateHash": "6bd0284a5aa2357b5c0f79fedf495461dc62d3569d80a089565435c4195b2928",
+      "variant": "reply",
+      "raw": {
+        "type": "noul",
+        "noul": 0.99
+      },
+      "probability": 0.99,
+      "confidence": null,
+      "latencyMs": 800,
+      "usage": {
+        "inputTokens": 300,
+        "outputTokens": 5
+      },
+      "cost": 0.0001,
+      "error": null
+    },
+    {
+      "targetId": "4003",
+      "questionId": "is_ack",
+      "questionType": "noul",
+      "questionDefHash": "277c1b9cb5de890b102485a0b5154735190967a7e016d0c31e9fe3a8c62a1ed8",
+      "stateHash": "4800e964cf7db6950d639ddb396dcd17350481b7a88841afca30501d9d708bfe",
+      "variant": "reply",
+      "raw": {
+        "type": "noul",
+        "noul": 0.85
+      },
+      "probability": 0.85,
+      "confidence": null,
+      "latencyMs": 800,
+      "usage": {
+        "inputTokens": 300,
+        "outputTokens": 5
+      },
+      "cost": 0.0001,
+      "error": null
+    },
+    {
+      "targetId": "4004",
+      "questionId": "is_ack",
+      "questionType": "noul",
+      "questionDefHash": "277c1b9cb5de890b102485a0b5154735190967a7e016d0c31e9fe3a8c62a1ed8",
+      "stateHash": "72b5c034b2c9724d1b0bd844eb9a381ac0397879c80bb5f0c2e4fd63cdcebe43",
+      "variant": "reply",
+      "raw": {
+        "type": "noul",
+        "noul": 0.5
+      },
+      "probability": 0.5,
+      "confidence": null,
+      "latencyMs": 800,
+      "usage": {
+        "inputTokens": 300,
+        "outputTokens": 5
+      },
+      "cost": 0.0001,
+      "error": null
+    },
+    {
+      "targetId": "1003",
+      "questionId": "is_ack",
+      "questionType": "noul",
+      "questionDefHash": "277c1b9cb5de890b102485a0b5154735190967a7e016d0c31e9fe3a8c62a1ed8",
+      "stateHash": "3cc92272d34410782e4aff495d8ae2400c888ee386cf2f5d24287c46f5f21e58",
+      "variant": "reply",
+      "raw": {
+        "type": "noul",
+        "noul": 0.3
+      },
+      "probability": 0.3,
+      "confidence": null,
+      "latencyMs": 800,
+      "usage": {
+        "inputTokens": 300,
+        "outputTokens": 5
+      },
+      "cost": 0.0001,
+      "error": null
+    },
+    {
+      "targetId": "2002",
+      "questionId": "is_ack",
+      "questionType": "noul",
+      "questionDefHash": "277c1b9cb5de890b102485a0b5154735190967a7e016d0c31e9fe3a8c62a1ed8",
+      "stateHash": "49aa69089921c49625ce2d9f141372f23f697e3092369272e859b1ae9f35fda3",
+      "variant": "reply",
+      "raw": {
+        "type": "noul",
+        "noul": 0.8
+      },
+      "probability": 0.8,
+      "confidence": null,
+      "latencyMs": 800,
+      "usage": {
+        "inputTokens": 300,
+        "outputTokens": 5
+      },
+      "cost": 0.0001,
+      "error": null
+    },
+    {
+      "targetId": "5002",
+      "questionId": "is_ack",
+      "questionType": "noul",
+      "questionDefHash": "277c1b9cb5de890b102485a0b5154735190967a7e016d0c31e9fe3a8c62a1ed8",
+      "stateHash": "fb7e0af09c1f861ccbd86101cd938a73021363cc1dfbfb66823854b725f07373",
+      "variant": "reply",
+      "raw": {
+        "type": "noul",
+        "noul": 0.65
+      },
+      "probability": 0.65,
+      "confidence": null,
+      "latencyMs": 800,
+      "usage": {
+        "inputTokens": 300,
+        "outputTokens": 5
+      },
+      "cost": 0.0001,
+      "error": null
+    }
+  ]
+}

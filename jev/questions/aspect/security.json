@@ -1,0 +1,10 @@
+{
+  "id": "security",
+  "type": "noul",
+  "target": "root",
+  "instructions": "Does `comment` (a code review comment on the code in `diffHunk`) talk about security?",
+  "criteria": {
+    "true": "The comment raises a security concern: injection, unsafe input handling, authentication or authorization, secrets, denial of service, or a vulnerable dependency.",
+    "false": "The comment does not raise a security concern."
+  }
+}

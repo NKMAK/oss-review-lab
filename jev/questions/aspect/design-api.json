@@ -1,0 +1,10 @@
+{
+  "id": "design-api",
+  "type": "noul",
+  "target": "root",
+  "instructions": "Does `comment` (a code review comment on the code in `diffHunk`) talk about the design or public API of the code?",
+  "criteria": {
+    "true": "The comment discusses how the code or its public API is designed: naming of public options, method signatures, where responsibility belongs, abstractions, module boundaries, or how users will call it.",
+    "false": "The comment is only about internal typos, formatting, tests, documentation wording, or a specific bug, and does not discuss design or API shape."
+  }
+}

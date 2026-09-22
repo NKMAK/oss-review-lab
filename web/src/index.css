@@ -1,0 +1,10 @@
+/*
+ * MUI と Tailwind の読み込み順を、cascade layerで固定する。
+ * 順序: theme < base(preflight) < mui < components < utilities
+ * → MUIのスタイルはpreflightより強く、Tailwindのユーティリティ(className)はMUIより強い。
+ * MUI側は、main.tsx の <StyledEngineProvider injectFirst enableCssLayer> が、`@layer mui` に入れる。
+ */
+@layer theme, base, mui, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/utilities.css" layer(utilities);

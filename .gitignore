@@ -1,2 +1,10 @@
 .claude/
 docs/
+/data/
+.env
+node_modules/
+playwright-report/
+test-results/
+*.log
+dist/
+jev/pricing.json

@@ -1,0 +1,4 @@
+[
+  {"number":7,"title":"dummy PR 7","url":"https://example.test/example/repo/pull/7","author":{"login":"author1"}},
+  {"number":8,"title":"dummy PR 8","url":"https://example.test/example/repo/pull/8","author":null}
+]

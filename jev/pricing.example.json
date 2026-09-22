@@ -1,0 +1,6 @@
+{
+  "_note": "実際の値(出典: https://docs.typesafe.ai/models.md 入力 $0.042/100万トークン、出力トークンは無料)。jev/pricing.json として保存する(pricing.json はコミットしない)。値が変わっていないか、公式ページで確認すること。",
+  "schemaVersion": 1,
+  "inputUsdPerToken": 4.2e-8,
+  "outputUsdPerToken": 0
+}
