@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ASPECT_IDS, IS_ACK_ID, STYLE_IDS } from "@oss-review-lab/shared";
+import { ASPECT_IDS, IS_ACK_ID, STYLE_IDS, UNDERSTANDABILITY_IDS } from "@oss-review-lab/shared";
 import { z } from "zod";
 import { sha256, stableStringify } from "./state";
 
@@ -18,7 +18,8 @@ export type QuestionDefs = {
   isAck: QuestionDef;
   aspects: QuestionDef[];
   styles: QuestionDef[];
-  /** aspects → styles → isAck の順 */
+  understandability: QuestionDef[];
+  /** aspects → styles → understandability → isAck の順 */
   all: QuestionDef[];
 };
 
@@ -44,7 +45,8 @@ export function loadQuestionDefs(dir: string = DEFAULT_QUESTIONS_DIR): QuestionD
   const isAck = readDef(join(dir, "is-ack.json"), IS_ACK_ID);
   const aspects = ASPECT_IDS.map((id) => readDef(join(dir, "aspect", `${id}.json`), id));
   const styles = STYLE_IDS.map((id) => readDef(join(dir, "style", `${id}.json`), id));
-  return { isAck, aspects, styles, all: [...aspects, ...styles, isAck] };
+  const understandability = UNDERSTANDABILITY_IDS.map((id) => readDef(join(dir, "understandability", `${id}.json`), id));
+  return { isAck, aspects, styles, understandability, all: [...aspects, ...styles, ...understandability, isAck] };
 }
 
 /** 定義内容(id・type・target・instructions・criteria)のsha256。 */

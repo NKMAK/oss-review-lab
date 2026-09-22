@@ -176,6 +176,28 @@ describe("filterThreadViews", () => {
   });
 });
 
+describe("filterThreadViews: selfContainedOnly(OSSの知識が無くてもわかるものだけ)", () => {
+  // self-contained の確率は向きが逆(生の確率=知識が要る確率)。1(生0.6)は反転後0.4(知識が要る側)、
+  // 3(生0.2)は反転後0.8(知識が無くてもわかる側)。2は未判定(結果が無い)。
+  const results = [result("1", "self-contained", 0.6), result("3", "self-contained", 0.2)];
+  const threads = [thread("1"), thread("2"), thread("3")];
+  const views = threads.map((t) => buildThreadView(t, results, T));
+  const ids = (p: Partial<ViewParams>) => filterThreadViews(views, params(p)).map((v) => v.thread.threadId);
+
+  it("既定(オフ)では、全て出る", () => {
+    expect(ids({})).toEqual(["1", "2", "3"]);
+  });
+
+  it("オンにすると、反転後の確率がlabelThreshold(既定0.5)以上のものだけ残る。未判定は除く", () => {
+    expect(ids({ selfContainedOnly: true })).toEqual(["3"]);
+  });
+
+  it("labelThresholdを下げると、境界(反転後ちょうど)も含まれる", () => {
+    // 1の反転後は0.4なので、閾値0.4ちょうどなら含める
+    expect(ids({ selfContainedOnly: true, labelThreshold: 0.4 })).toEqual(["1", "3"]);
+  });
+});
+
 describe("sortThreadViewsByProbability", () => {
   it("指定した質問の確率が高い順に並べる。無い(未判定・確率なし)ものは最後、元の順を保つ", () => {
     const views = [

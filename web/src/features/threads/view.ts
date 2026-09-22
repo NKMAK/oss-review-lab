@@ -1,6 +1,16 @@
-import { IS_ACK_ID, deriveLabels, isAckExcluded, isCodeExcludedReply } from "@oss-review-lab/shared";
+import {
+  IS_ACK_ID,
+  UNDERSTANDABILITY_IDS,
+  deriveLabels,
+  isAckExcluded,
+  isCodeExcludedReply,
+  isSelfContained,
+} from "@oss-review-lab/shared";
 import type { Comment, DerivedLabels, Result, Thread } from "@oss-review-lab/shared";
 import type { ViewParams } from "../../params/params";
+
+/** 「知識が無くてもわかるものだけ」の絞り込みに使う質問ID。 */
+const SELF_CONTAINED_ID: string = UNDERSTANDABILITY_IDS[0];
 
 export type ExcludedReplyReason = "ack" | "bot" | "unknown";
 
@@ -74,6 +84,10 @@ export function filterThreadViews(views: readonly ThreadView[], params: ViewPara
     if (!params.showExcluded && v.thread.excludedReason !== null) return false;
     if (params.aspects.length > 0 && !v.labels.aspects.some((a) => params.aspects.includes(a))) return false;
     if (params.styles.length > 0 && !v.labels.styles.some((s) => params.styles.includes(s))) return false;
+    if (params.selfContainedOnly) {
+      const raw = v.probabilities[SELF_CONTAINED_ID];
+      if (raw === undefined || !isSelfContained(raw, params.labelThreshold)) return false;
+    }
     if (params.role !== "all") {
       const isAuthor = v.root?.isPrAuthor ?? null;
       if (isAuthor === null) return false;

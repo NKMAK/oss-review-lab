@@ -54,13 +54,14 @@ describe("parseViewParams", () => {
       variant: "parent-only",
       run: null,
       sort: "created",
+      selfContainedOnly: false,
     });
   });
 
   it("正しいクエリを全て解釈する", () => {
     expect(
       parse(
-        "ackThreshold=0.9&labelThreshold=0.7&band=0.2&aspects=types,tests,other&styles=question&role=reviewer&excluded=1&variant=with-replies&run=run-b&sort=explains-reason",
+        "ackThreshold=0.9&labelThreshold=0.7&band=0.2&aspects=types,tests,other&styles=question&role=reviewer&excluded=1&variant=with-replies&run=run-b&sort=explains-reason&selfContainedOnly=1",
       ),
     ).toEqual({
       ackThreshold: 0.9,
@@ -73,6 +74,7 @@ describe("parseViewParams", () => {
       variant: "with-replies",
       run: "run-b",
       sort: "explains-reason",
+      selfContainedOnly: true,
     });
   });
 
@@ -136,6 +138,12 @@ describe("parseViewParams", () => {
     expect(parse("excluded=yes").showExcluded).toBe(false);
   });
 
+  it("selfContainedOnlyは1のときだけtrue(showExcludedと同じ形式)", () => {
+    expect(parse("selfContainedOnly=1").selfContainedOnly).toBe(true);
+    expect(parse("selfContainedOnly=yes").selfContainedOnly).toBe(false);
+    expect(parse("").selfContainedOnly).toBe(false);
+  });
+
   it("bandが不正なら既定値", () => {
     expect(parse("band=2").band).toBe(0.1);
   });
@@ -154,9 +162,10 @@ describe("toSearchParams", () => {
       variant: "with-replies" as const,
       run: "run-b",
       sort: "explains-reason" as const,
+      selfContainedOnly: true,
     };
     expect(toSearchParams(p).toString()).toBe(
-      "ackThreshold=0.9&labelThreshold=0.7&band=0.2&aspects=types%2Ctests&styles=question&role=pr-author&excluded=1&variant=with-replies&run=run-b&sort=explains-reason",
+      "ackThreshold=0.9&labelThreshold=0.7&band=0.2&aspects=types%2Ctests&styles=question&role=pr-author&excluded=1&variant=with-replies&run=run-b&sort=explains-reason&selfContainedOnly=1",
     );
     expect(parse(toSearchParams(p).toString())).toEqual(p);
   });

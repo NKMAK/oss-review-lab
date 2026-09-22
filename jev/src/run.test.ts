@@ -113,7 +113,11 @@ type TestOptions = Partial<RunJevOptions> & {
 function seedHistory(options: { questionIds?: string[]; isAck?: boolean; variant?: RunJevOptions["variant"]; requests?: number; split?: boolean }): void {
   const defs = loadQuestionDefs();
   const ids = options.questionIds;
-  const selected = options.isAck ? [defs.isAck] : ids === undefined ? [...defs.aspects, ...defs.styles] : defs.all.filter((d) => ids.includes(d.id));
+  const selected = options.isAck
+    ? [defs.isAck]
+    : ids === undefined
+      ? [...defs.aspects, ...defs.styles, ...defs.understandability]
+      : defs.all.filter((d) => ids.includes(d.id));
   const variant = options.isAck ? "reply" : options.variant === "reply" ? "parent-only" : options.variant ?? "parent-only";
   const planHash = questionPlanHash(selected);
   const manifest = ManifestSchema.parse(JSON.parse(readFileSync(join(dataDir, "index.json"), "utf8")));
@@ -198,7 +202,7 @@ async function ledgerTotals(limit = 3.5) {
 }
 
 describe("予算ガード: 費用はリクエスト単位で1回だけ", () => {
-  it("15問を1リクエストで送ると、費用は1リクエスト分だけが台帳に確定され、最初のResultにだけ入る", async () => {
+  it("16問を1リクエストで送ると、費用は1リクエスト分だけが台帳に確定され、最初のResultにだけ入る", async () => {
     seedThreads(1);
     const { fetch, calls } = mockFetch();
     const out = await runJev(opts({ fetch }));
@@ -208,14 +212,15 @@ describe("予算ガード: 費用はリクエスト単位で1回だけ", () => {
       "design-api", "types", "bug-edge-case", "compatibility-release", "tests",
       "readability-naming", "docs-comments", "security", "performance", "deps-build-tooling",
       "suggests-fix", "explains-reason", "question", "shares-context", "feature-request",
+      "self-contained",
     ]);
     expect(out.kind).toBe("run");
     const run = readRun(out.runId);
     expect(run.status).toBe("complete");
     expect(run.model).toBe("jev-1.13.0");
-    expect(run.results.length).toBe(15);
-    expect(run.results.map((r) => r.cost)).toEqual([0.2, ...Array(14).fill(null)]);
-    expect(run.results.map((r) => r.usage)).toEqual([{ inputTokens: 100, outputTokens: 10 }, ...Array(14).fill(null)]);
+    expect(run.results.length).toBe(16);
+    expect(run.results.map((r) => r.cost)).toEqual([0.2, ...Array(15).fill(null)]);
+    expect(run.results.map((r) => r.usage)).toEqual([{ inputTokens: 100, outputTokens: 10 }, ...Array(15).fill(null)]);
     const first = run.results[0]!;
     expect({ ...first, questionDefHash: "H", stateHash: "S", raw: "R" }).toEqual({
       targetId: "1000",
@@ -240,8 +245,8 @@ describe("予算ガード: 費用はリクエスト単位で1回だけ", () => {
     expect(id).toMatch(/^[0-9a-f]{32}$/);
     const at = "2026-09-22T00:00:00.000Z";
     expect(ledger).toEqual([
-      // 予約額は、実績から決まる: 出力10トークン/15問 × 安全率2 = 1問1.33トークン → 2トークンに切り上げ × 15問 × 0.02 = 0.6
-      { schemaVersion: 1, at, event: "reserved", requestId: id, runId: out.runId, amount: 0.6 },
+      // 予約額は、実績から決まる: 出力10トークン/16問 × 安全率2 = 1問1.25トークン → 2トークンに切り上げ × 16問 × 0.02 = 0.64
+      { schemaVersion: 1, at, event: "reserved", requestId: id, runId: out.runId, amount: 0.64 },
       { schemaVersion: 1, at, event: "sent", requestId: id },
       { schemaVersion: 1, at, event: "settled", requestId: id, cost: 0.2 },
     ]);
@@ -421,7 +426,7 @@ describe("並列数は、実績が積み上がるまで1に固定する", () => 
     expect(r.logs).toContain("同じ質問計画・variant の完了実績が 0 件で20件未満のため、並列数を 3 から 1 にします");
   });
 
-  it("実績は、リクエスト数で数える(15問1リクエストは1件。Resultの数=15件ではない)", async () => {
+  it("実績は、リクエスト数で数える(16問1リクエストは1件。Resultの数=16件ではない)", async () => {
     const r = await measureConcurrency({ historyRequests: 2, questionIds: undefined });
     expect(r.calls).toBe(4);
     expect(r.maxInFlight).toBe(1);
@@ -514,7 +519,7 @@ describe("出力実績が無い最初の実行は、1リクエスト・1質問�
   });
 
   it("同じvariantで、別の質問(1問)の実績が1件あれば、質問セット(複数問)をまとめた初回実行も、制約が外れる(--max-cost-per-requestは必要)", async () => {
-    // 実データでの試走で見つかった不具合の再現: 質問セット(15問)の完全一致だけで実績を数えると、
+    // 実データでの試走で見つかった不具合の再現: 質問セット(16問)の完全一致だけで実績を数えると、
     // そのセットで送る限り、実績を作る手段が無く、永久に初回実行の制約(1問だけ)から抜け出せない。
     // 出力は無料なので、質問数が増えても出力コストは増えない。別の質問の実績が1件でもあれば、十分。
     seedThreads(3);
@@ -522,14 +527,14 @@ describe("出力実績が無い最初の実行は、1リクエスト・1質問�
     await runJev(opts({ fetch: first.fetch, seedHistory: false, maxCostPerRequest: 0.5, mode: "limit", limit: 1, questionIds: ["design-api"] }));
 
     const defs = loadQuestionDefs();
-    const fullPlan = [...defs.aspects, ...defs.styles]; // questionIds を指定しない、既定の質問セット(15問)
+    const fullPlan = [...defs.aspects, ...defs.styles, ...defs.understandability]; // questionIds を指定しない、既定の質問セット(16問)
     const second = mockFetch();
     const out = await runJev(
       opts({ fetch: second.fetch, seedHistory: false, maxCostPerRequest: 0.5, mode: "limit", limit: 1 }),
     );
     expect(second.calls.length).toBe(1);
     // 1件目のrunで、同じ対象(1件目のスレッド)の design-api は、既に判定済み(キャッシュ済み)なので、
-    // 2件目のリクエストには、残り14問だけが含まれる。
+    // 2件目のリクエストには、残り15問だけが含まれる。
     expect(Object.keys(second.calls[0]!.body.questions).sort()).toEqual(
       fullPlan.map((d) => d.id).filter((id) => id !== "design-api").sort(),
     );
@@ -732,7 +737,7 @@ describe("キャッシュ", () => {
     const out = await runJev(opts({ fetch: b.fetch }));
     expect(b.calls.length).toBe(0);
     expect(readRun(out.runId).status).toBe("complete");
-    expect(readRun(out.runId).results.length).toBe(30);
+    expect(readRun(out.runId).results.length).toBe(32);
 
     // 別の本文にすると、キャッシュは効かない
     seedThreads(2, (i) => ({ bodyKey: `changed-${i}` }));
@@ -750,7 +755,7 @@ describe("--dry-run", () => {
     expect(calls.length).toBe(0);
     expect(plan).toEqual({
       targets: 3,
-      questions: 15,
+      questions: 16,
       requests: 3,
       cachedRequests: 0,
       requestsToSend: 3,
@@ -768,10 +773,10 @@ describe("--dry-run", () => {
     const plan = await planDryRun(opts({ mode: "dry-run", apiKey: null, limit: 2, split: true, maxCostPerRequest: undefined, seedHistory: false }));
     expect(plan).toEqual({
       targets: 2,
-      questions: 15,
-      requests: 30,
+      questions: 16,
+      requests: 32,
       cachedRequests: 0,
-      requestsToSend: 30,
+      requestsToSend: 32,
       reservePerRequest: null,
       estimatedCost: null,
       note: "使用量が未確認のため見積もれません(--max-cost-per-request を指定してください)",
@@ -818,8 +823,8 @@ describe("単価・予約額のガード", () => {
     const out = await runJev(opts({ fetch: b.fetch, maxCostPerRequest: undefined }));
     expect(b.calls.length).toBe(2);
     const ledger = readLedger().filter((e) => e.runId === out.runId);
-    // 実績(15問で出力10トークン)の1問あたり 0.67 × 安全率2 → 2トークンに切り上げ × 15問 × 単価0.02(入力単価は0)
-    expect(ledger.map((e) => e.amount)).toEqual([0.6, 0.6]);
+    // 実績(16問で出力10トークン)の1問あたり 0.625 × 安全率2 → 2トークンに切り上げ × 16問 × 単価0.02(入力単価は0)
+    expect(ledger.map((e) => e.amount)).toEqual([0.64, 0.64]);
   });
 
   it("APIキーが無ければ、実行を拒否する(キー名だけを示す)", async () => {
@@ -1161,11 +1166,11 @@ describe("report", () => {
     );
   });
 
-  it("15問1リクエストでも、費用・トークンは1リクエスト分だけ数える(15倍にしない)", async () => {
+  it("16問1リクエストでも、費用・トークンは1リクエスト分だけ数える(16倍にしない)", async () => {
     seedThreads(1);
     const out = await runJev(opts({ fetch: mockFetch().fetch }));
     const [r] = await buildReport(dataDir, out.runId);
-    expect([r!.results, r!.requests, r!.inputTokens, r!.outputTokens, r!.cost]).toEqual([15, 1, 100, 10, 0.2]);
+    expect([r!.results, r!.requests, r!.inputTokens, r!.outputTokens, r!.cost]).toEqual([16, 1, 100, 10, 0.2]);
   });
 
   it("--observed-cost に負・NaNは拒否する。同じrunに複数回記録したら、新しい値を使う", async () => {

@@ -7,7 +7,7 @@ import runWithReplies from "../fixtures/data/runs/run-20260921-with-replies.json
 import threadsJsonl from "../fixtures/data/threads/threads.jsonl?raw";
 import { ManifestSchema, RunSchema } from "./run";
 import { ThreadSchema } from "./thread";
-import { deriveLabels, isCodeExcludedReply } from "./derive";
+import { deriveLabels, isCodeExcludedReply, selfContainedProbability } from "./derive";
 
 const runFiles: Record<string, unknown> = {
   "runs/run-20260921-ack.json": runAck,
@@ -76,12 +76,23 @@ describe("fixtures", () => {
   it("複数観点のスレッドが、導出で複数ラベルになる(エラーの質問は無視)", () => {
     const run = RunSchema.parse(runAspects);
     const r1001 = run.results.filter((r) => r.targetId === "1001");
-    expect(r1001.length).toBe(15);
+    expect(r1001.length).toBe(16);
     expect(deriveLabels(r1001, 0.5)).toEqual({
       aspects: ["design-api", "types", "tests"],
       styles: ["explains-reason"],
     });
     expect(r1001.filter((r) => r.error !== null).map((r) => r.questionId)).toEqual(["performance"]);
+  });
+
+  it("self-contained(理解のしやすさ)の結果がある。1001は知識が無くてもわかる側、4001は要る側", () => {
+    const run = RunSchema.parse(runAspects);
+    const selfContainedOf = (targetId: string) =>
+      run.results.find((r) => r.targetId === targetId && r.questionId === "self-contained")?.probability ?? null;
+    // raw(知識が要る確率)なので、Web側では 1 - probability にして使う(selfContainedProbability)
+    expect(selfContainedOf("1001")).toBe(0.3);
+    expect(selfContainedProbability(selfContainedOf("1001")!)).toBeCloseTo(0.7, 10);
+    expect(selfContainedOf("4001")).toBe(0.8);
+    expect(selfContainedProbability(selfContainedOf("4001")!)).toBeCloseTo(0.2, 10);
   });
 
   it("複数の質問を1リクエストで送った形: cost と usage はリクエストの先頭の Result にだけ入り、応答時間は同じリクエストで同じ値", () => {

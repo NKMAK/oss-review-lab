@@ -121,6 +121,16 @@ export function ThreadFilters({ params, update }: Props) {
             />
           }
         />
+        <FormControlLabel
+          label="OSSの知識が無くてもわかるものだけ"
+          control={
+            <Checkbox
+              size="small"
+              checked={params.selfContainedOnly}
+              onChange={(e) => update({ selfContainedOnly: e.target.checked })}
+            />
+          }
+        />
         {hasWithReplies && (
           <TextField
             select

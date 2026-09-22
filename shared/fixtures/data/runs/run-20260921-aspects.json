@@ -66,6 +66,10 @@
     {
       "id": "feature-request",
       "hash": "a2327f9db9d74bbe53f870b25f564acf3a8d2f558c865dacfaa15593be84af46"
+    },
+    {
+      "id": "self-contained",
+      "hash": "f3a5191544e2a99b8a869bb897e33d54992d1d037691bd2db6a30377a0c685d0"
     }
   ],
   "createdAt": "2026-09-21T01:00:00Z",
@@ -349,6 +353,24 @@
       "error": null
     },
     {
+      "targetId": "1001",
+      "questionId": "self-contained",
+      "questionType": "noul",
+      "questionDefHash": "f3a5191544e2a99b8a869bb897e33d54992d1d037691bd2db6a30377a0c685d0",
+      "stateHash": "810ab177f28a03536acf64f9d540022cbe03cb16fc76af444b496c746d0629f6",
+      "variant": "parent-only",
+      "raw": {
+        "type": "noul",
+        "noul": 0.3
+      },
+      "probability": 0.3,
+      "confidence": null,
+      "latencyMs": 800,
+      "usage": null,
+      "cost": null,
+      "error": null
+    },
+    {
       "targetId": "4001",
       "questionId": "design-api",
       "questionType": "noul",
@@ -615,6 +637,24 @@
         "noul": 0.1
       },
       "probability": 0.1,
+      "confidence": null,
+      "latencyMs": 1200,
+      "usage": null,
+      "cost": null,
+      "error": null
+    },
+    {
+      "targetId": "4001",
+      "questionId": "self-contained",
+      "questionType": "noul",
+      "questionDefHash": "f3a5191544e2a99b8a869bb897e33d54992d1d037691bd2db6a30377a0c685d0",
+      "stateHash": "7bfe9157b41fee2c1fd52781d0dfae76d40bbf4aba37896a496358e7293cacbe",
+      "variant": "parent-only",
+      "raw": {
+        "type": "noul",
+        "noul": 0.8
+      },
+      "probability": 0.8,
       "confidence": null,
       "latencyMs": 1200,
       "usage": null,
